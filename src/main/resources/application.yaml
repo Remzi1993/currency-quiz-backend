@@ -1,12 +1,18 @@
 ktor:
   deployment:
-    port: 8080
+    port: "${PORT:8080}"
   application:
     modules:
-      - info.remzi.currencyquiz.HttpKt.configureHttp
-      - info.remzi.currencyquiz.SerializationKt.configureSerialization
-      - info.remzi.currencyquiz.SecurityKt.configureSecurity
-      - info.remzi.currencyquiz.RateLimitingKt.configureRateLimiting
-      - info.remzi.currencyquiz.RequestValidationKt.configureRequestValidation
-      - info.remzi.currencyquiz.StatusPagesKt.configureStatusPages
-      - info.remzi.currencyquiz.RoutingKt.configureRouting
+      - info.remzi.currencyquiz.ApplicationKt.module
+
+security:
+  adminUsername: "${ADMIN_USERNAME:}"
+  adminPassword: "${ADMIN_PASSWORD:}"
+  jwtSecret: "${JWT_SECRET:}"
+  jwtIssuer: "${JWT_ISSUER:currencyquiz-api}"
+  jwtAudience: "${JWT_AUDIENCE:currencyquiz-admin}"
+  tokenTtlSeconds: "${JWT_TOKEN_TTL_SECONDS:3600}"
+cors:
+  allowedOrigins: "${CORS_ALLOWED_ORIGINS:}"
+storage:
+  questionsFile: "${QUESTIONS_FILE:data/questions.json}"

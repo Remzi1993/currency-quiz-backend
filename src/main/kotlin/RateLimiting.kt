@@ -1,21 +1,18 @@
 package info.remzi.currencyquiz
 
-import io.github.flaxoos.ktor.server.plugins.ratelimiter.*
-import io.github.flaxoos.ktor.server.plugins.ratelimiter.implementations.*
 import io.ktor.server.application.*
-import io.ktor.server.routing.*
-import kotlin.time.Duration.Companion.seconds
+import io.ktor.server.plugins.ratelimit.*
+import kotlin.time.Duration.Companion.minutes
 
 fun Application.configureRateLimiting() {
-    routing {
-        route("/"){
-            install(RateLimiting) {
-                rateLimiter {
-                    type = TokenBucket::class
-                    capacity = 100
-                    rate = 10.seconds
-                }
-            }
+    install(RateLimit) {
+        register(RateLimitName("login")) {
+            rateLimiter(limit = 5, refillPeriod = 1.minutes)
+            requestKey { it.request.local.remoteHost }
+        }
+        register(RateLimitName("answers")) {
+            rateLimiter(limit = 30, refillPeriod = 1.minutes)
+            requestKey { it.request.local.remoteHost }
         }
     }
 }

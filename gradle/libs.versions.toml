@@ -1,10 +1,8 @@
 [versions]
-flaxoos = "2.3.0"
-kotlin = "2.4.0"
-logback = "1.5.37"
+kotlin = "2.4.21"
+logback = "1.6.5"
 
 [libraries]
-flaxoos-ktor-server-rateLimiting = { module = "io.github.flaxoos:ktor-server-rate-limiting", version.ref = "flaxoos" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
 
 [plugins]

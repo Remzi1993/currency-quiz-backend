@@ -6,14 +6,14 @@ plugins {
 }
 
 group = "info.remzi.currencyquiz"
-version = "1.0.0-SNAPSHOT"
+version = "1.0.0"
 
 application {
     mainClass = "io.ktor.server.netty.EngineMain"
 }
 
 kotlin {
-    jvmToolchain(21)
+    jvmToolchain(25)
 }
 dependencies {
     implementation(ktorLibs.serialization.kotlinx.json)
@@ -26,10 +26,9 @@ dependencies {
     implementation(ktorLibs.server.cors)
     implementation(ktorLibs.server.netty)
     implementation(ktorLibs.server.requestValidation)
-    implementation(ktorLibs.server.routingOpenapi)
+    implementation(ktorLibs.server.rateLimit)
     implementation(ktorLibs.server.statusPages)
     implementation(ktorLibs.server.swagger)
-    implementation(libs.flaxoos.ktor.server.rateLimiting)
     implementation(libs.logback.classic)
 
     testImplementation(kotlin("test"))

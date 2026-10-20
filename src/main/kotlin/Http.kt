@@ -3,29 +3,27 @@ package info.remzi.currencyquiz
 import io.ktor.server.application.*
 import io.ktor.http.*
 import io.ktor.server.plugins.cors.routing.*
-import io.ktor.server.response.*
 import io.ktor.server.plugins.swagger.*
 import io.ktor.server.routing.*
+import java.net.URI
 
-fun Application.configureHttp() {
+fun Application.configureHttp(settings: ApiSettings) {
     install(CORS) {
         allowMethod(HttpMethod.Options)
-        allowMethod(HttpMethod.Put)
+        allowMethod(HttpMethod.Post)
         allowMethod(HttpMethod.Delete)
         allowMethod(HttpMethod.Patch)
         allowHeader(HttpHeaders.Authorization)
-        allowHeader("MyCustomHeader")
-        anyHost() // @TODO: Don't do this in production if possible. Try to limit it.
+        allowHeader(HttpHeaders.ContentType)
+        exposeHeader(HttpHeaders.Location)
+        exposeHeader(HttpHeaders.RetryAfter)
+        allowNonSimpleContentTypes = true
+        settings.allowedOrigins.forEach { origin ->
+            val uri = URI(origin)
+            allowHost(uri.rawAuthority, schemes = listOf(uri.scheme))
+        }
     }
     routing {
-        swaggerUI(path = "openapi") {
-            /*
-             Documentation source configuration goes here.
-    
-             This can be from file (documentation.yaml), or it can be served dynamically from your sources using the
-             `describe {}` API on routes.  When `openApi` enabled in Gradle, these calls will be automatically injected
-             based on your code and comments.
-             */
-        }
+        swaggerUI(path = "openapi", swaggerFile = "documentation.yaml")
     }
 }
