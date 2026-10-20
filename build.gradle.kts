@@ -9,13 +9,14 @@ group = "info.remzi.currencyquiz"
 version = "1.0.0"
 
 application {
-    mainClass = "io.ktor.server.netty.EngineMain"
+    mainClass = "info.remzi.currencyquiz.MainKt"
 }
 
 kotlin {
     jvmToolchain(25)
 }
 dependencies {
+    implementation(libs.dotenv.kotlin)
     implementation(ktorLibs.serialization.kotlinx.json)
     implementation(ktorLibs.server.auth)
     implementation(ktorLibs.server.auth.jwt)

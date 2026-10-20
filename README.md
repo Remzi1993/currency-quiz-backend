@@ -4,20 +4,28 @@ A Ktor REST API for playing a currency quiz without an account and managing ques
 
 ## Run locally
 
-Use Java 21 or newer to run Gradle. The build uses a Java 21 toolchain and the included Gradle wrapper.
+Use JDK 25 to build and run the API. The build uses a Java 25 toolchain and the included Gradle wrapper.
 
-Set these environment variables in PowerShell 7 (with .NET 6 or newer) before starting the server:
+Create your local configuration once in PowerShell 7 (with .NET 6 or newer):
 
 ```powershell
-$env:ADMIN_USERNAME = Read-Host "Admin username"
-$env:ADMIN_PASSWORD = Read-Host "Admin password (at least 12 characters)" -MaskInput
-$env:JWT_SECRET = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
+Copy-Item .env.example .env
 
-# Optional: allow your browser frontend to call the API.
-$env:CORS_ALLOWED_ORIGINS = "http://localhost:5173"
+# Generate a signing secret, then paste it into JWT_SECRET in .env.
+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
 
+notepad .env
+```
+
+Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. `CORS_ALLOWED_ORIGINS` can contain your frontend's origin.
+
+After saving `.env`, start the server from the project root:
+
+```powershell
 .\gradlew.bat run
 ```
+
+The application loads `.env` automatically on each start. You do not need to set variables in the terminal again. For an IDE run configuration, run `info.remzi.currencyquiz.MainKt` with the project root as its working directory.
 
 The API listens on `http://localhost:8080`. Interactive Swagger documentation is available at `http://localhost:8080/openapi`.
 
@@ -35,7 +43,7 @@ The server requires credentials and a signing secret at startup; there are no de
 | `CORS_ALLOWED_ORIGINS` | No | Empty; comma-separated HTTP(S) origins, such as `http://localhost:5173,https://quiz.example.com` |
 | `QUESTIONS_FILE` | No | `data/questions.json`, relative to the working directory |
 
-[.env.example](.env.example) lists the available variables. A `.env` file is not loaded automatically: export variables in your shell or configure them in your IDE or hosting environment. Do not commit credentials or signing secrets.
+[.env.example](.env.example) lists the supported variables. `.env` is read from the process working directory and supports comments and double-quoted values. Existing OS environment variables and explicit JVM system properties take precedence over values in `.env`. A missing `.env` is allowed when settings come from your IDE or hosting environment; malformed entries cause a configuration error. `.env` is ignored by Git. Do not commit credentials or signing secrets.
 
 ## Endpoints
 
@@ -55,13 +63,15 @@ Management responses include `correctAnswer`. Send the token as `Authorization: 
 
 ### Example flow
 
-In another PowerShell terminal, set `ADMIN_USERNAME` and `ADMIN_PASSWORD` to the same credentials used to start the server. Then log in and create a question:
+In another PowerShell 7 terminal, enter the same admin credentials saved in `.env`, then log in and create a question. The application loads `.env` for itself; it does not populate your terminal's environment.
 
 ```powershell
 $baseUrl = "http://localhost:8080/api/v1"
+$adminUsername = Read-Host "Admin username"
+$adminPassword = Read-Host "Admin password" -MaskInput
 $login = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/login" `
     -ContentType "application/json" `
-    -Body (@{ username = $env:ADMIN_USERNAME; password = $env:ADMIN_PASSWORD } | ConvertTo-Json)
+    -Body (@{ username = $adminUsername; password = $adminPassword } | ConvertTo-Json)
 
 # Login returns { accessToken, tokenType: "Bearer", expiresIn: 3600 }.
 $headers = @{ Authorization = "Bearer $($login.accessToken)" }
@@ -128,6 +138,8 @@ Login allows 5 requests per minute per client IP. Answer submission allows 30 re
 ## Storage and deployment
 
 Questions start empty and are saved to `QUESTIONS_FILE` using atomic file replacement where the filesystem supports it. They survive restarts when the same file is retained. Use a persistent writable volume when deploying in a container. The file contains correct answers, so do not serve it as a public static asset or commit it.
+
+`src/main/resources` is packaged into the application's JAR. It is suitable for configuration, static files, or read-only starter data. Mutable questions belong in the external `data/questions.json` file so updates can be written and retained across deployments. A future seed file in resources could be copied to external storage on first run; this API currently starts with an empty question list.
 
 This repository is intended for one server process accessing the questions file. Use a database and shared rate limiting before running multiple instances. The local JSON repository is separate from routing so storage can be replaced later.
 
