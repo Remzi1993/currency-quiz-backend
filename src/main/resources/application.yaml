@@ -1,0 +1,12 @@
+ktor:
+  deployment:
+    port: 8080
+  application:
+    modules:
+      - info.remzi.currencyquiz.HttpKt.configureHttp
+      - info.remzi.currencyquiz.SerializationKt.configureSerialization
+      - info.remzi.currencyquiz.SecurityKt.configureSecurity
+      - info.remzi.currencyquiz.RateLimitingKt.configureRateLimiting
+      - info.remzi.currencyquiz.RequestValidationKt.configureRequestValidation
+      - info.remzi.currencyquiz.StatusPagesKt.configureStatusPages
+      - info.remzi.currencyquiz.RoutingKt.configureRouting
