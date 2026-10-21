@@ -4,7 +4,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -30,13 +29,22 @@ class FileQuestionRepository(file: Path) : QuestionRepository {
 
     init {
         Files.createDirectories(this.file.parent)
-        if (!Files.exists(this.file)) persist(emptyList())
-        val stored = json.decodeFromString<List<Question>>(Files.readString(this.file))
+        val existingContent = if (Files.exists(this.file)) Files.readString(this.file) else null
+        val needsSeed = existingContent.isNullOrBlank()
+        val content = if (needsSeed) {
+            FileQuestionRepository::class.java.getResourceAsStream("/questions-seed.json")
+                ?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                ?: error("Missing bundled questions-seed.json resource")
+        } else {
+            requireNotNull(existingContent)
+        }
+        val stored = json.decodeFromString<List<Question>>(content)
         require(stored.map { it.id }.distinct().size == stored.size) { "Duplicate question IDs in storage" }
         stored.forEach {
             require(isQuestionId(it.id)) { "Invalid question ID in storage" }
             require(questionValidationErrors(it.text, it.options, it.correctAnswer).isEmpty()) { "Invalid question in storage" }
         }
+        if (needsSeed) persistContent(content)
         questions = stored.associateBy { it.id }
     }
 
@@ -88,9 +96,13 @@ class FileQuestionRepository(file: Path) : QuestionRepository {
     }
 
     private fun persist(snapshot: List<Question>) {
+        persistContent(json.encodeToString(snapshot))
+    }
+
+    private fun persistContent(content: String) {
         val temporaryFile = Files.createTempFile(file.parent, ".questions-", ".tmp")
         try {
-            Files.writeString(temporaryFile, json.encodeToString(snapshot))
+            Files.writeString(temporaryFile, content)
             try {
                 Files.move(temporaryFile, file, ATOMIC_MOVE, REPLACE_EXISTING)
             } catch (_: AtomicMoveNotSupportedException) {

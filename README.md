@@ -6,7 +6,7 @@ A Ktor REST API for playing a currency quiz without an account and managing ques
 
 Use JDK 25 to build and run the API. The build uses a Java 25 toolchain and the included Gradle wrapper.
 
-Create your local configuration once in PowerShell 7 (with .NET 6 or newer):
+Create your local configuration once in PowerShell 7+:
 
 ```powershell
 Copy-Item .env.example .env
@@ -25,7 +25,7 @@ After saving `.env`, start the server from the project root:
 .\gradlew.bat run
 ```
 
-The application loads `.env` automatically on each start. You do not need to set variables in the terminal again. For an IDE run configuration, run `info.remzi.currencyquiz.MainKt` with the project root as its working directory.
+The application loads `.env` automatically on each start. You do not need to set variables in the terminal again. In IntelliJ, select the shared **Currency Quiz API** run configuration. It runs `info.remzi.currencyquiz.MainKt` with the project root as its working directory. Launching `io.ktor.server.netty.EngineMain` directly bypasses the `.env` loader and can cause a `Missing required configuration: security.adminUsername` error.
 
 The API listens on `http://localhost:8080`. Interactive Swagger documentation is available at `http://localhost:8080/openapi`.
 
@@ -137,9 +137,13 @@ Login allows 5 requests per minute per client IP. Answer submission allows 30 re
 
 ## Storage and deployment
 
-Questions start empty and are saved to `QUESTIONS_FILE` using atomic file replacement where the filesystem supports it. They survive restarts when the same file is retained. Use a persistent writable volume when deploying in a container. The file contains correct answers, so do not serve it as a public static asset or commit it.
+On startup, a missing or blank `QUESTIONS_FILE` is initialized from the bundled `questions-seed.json` resource. Parent directories are created automatically. A blank file includes a zero-byte file or one containing only whitespace. Existing question data is preserved, including an empty JSON array (`[]`), so deleting all questions does not restore the samples on restart. Invalid nonblank JSON causes startup to fail without replacing the file.
 
-`src/main/resources` is packaged into the application's JAR. It is suitable for configuration, static files, or read-only starter data. Mutable questions belong in the external `data/questions.json` file so updates can be written and retained across deployments. A future seed file in resources could be copied to external storage on first run; this API currently starts with an empty question list.
+Questions are saved to `QUESTIONS_FILE` using atomic file replacement where the filesystem supports it. They survive restarts when the same file is retained. Use a persistent writable volume when deploying in a container. The file contains correct answers, so do not serve it as a public static asset or commit it.
+
+`src/main/resources` is packaged into the application's JAR. It is suitable for configuration, static files, or read-only starter data. Mutable questions belong in the external `data/questions.json` file so updates can be written and retained across deployments.
+
+[questions.seed.json](src/main/resources/questions-seed.json) contains the 40 sample questions with four choices each. The seed is validated before being copied into writable storage; subsequent admin changes update only the external file. The sample currency-country mappings were checked on 20 October 2026 against the [SIX ISO 4217 current currency list](https://www.six-group.com/dam/download/financial-information/data-center/iso-currrency/lists/list-one.xml), published 17 September 2026.
 
 This repository is intended for one server process accessing the questions file. Use a database and shared rate limiting before running multiple instances. The local JSON repository is separate from routing so storage can be replaced later.
 

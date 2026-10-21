@@ -60,6 +60,41 @@ class ServerTest {
     }
 
     @Test
+    fun `first application startup serves the bundled quiz publicly without revealing answers`() {
+        val directory = Files.createTempDirectory("currencyquiz-seeded-api-test-")
+        val storage = directory.resolve("questions.json")
+        val resource = assertNotNull(javaClass.getResourceAsStream("/questions-seed.json"))
+        val seed = resource.bufferedReader().use { Json.decodeFromString<List<Question>>(it.readText()) }
+        try {
+            assertFalse(Files.exists(storage))
+            runApi(storage, initializeEmpty = false) {
+                val response = client.get("/api/v1/questions")
+                assertEquals(HttpStatusCode.OK, response.status)
+                val questions = response.json().jsonArray
+                assertEquals(40, questions.size)
+                assertEquals(seed.map { it.id }, questions.map { it.jsonObject.getValue("id").jsonPrimitive.content })
+                questions.forEach { assertPublicQuestion(it.jsonObject) }
+                val first = seed.first()
+                val publicQuestion = client.get("/api/v1/questions/${first.id}")
+                assertEquals(HttpStatusCode.OK, publicQuestion.status)
+                assertPublicQuestion(publicQuestion.json().jsonObject)
+                assertEquals(first.text, publicQuestion.json().jsonObject.getValue("text").jsonPrimitive.content)
+                val incorrect = first.options.first { it != first.correctAnswer }
+                for ((answer, correct) in listOf(first.correctAnswer to true, incorrect to false)) {
+                    val result = client.post("/api/v1/questions/${first.id}/answers") {
+                        jsonBody(buildJsonObject { put("answer", answer) }.toString())
+                    }
+                    assertEquals(HttpStatusCode.OK, result.status)
+                    assertEquals(buildJsonObject { put("correct", correct) }, result.json())
+                }
+            }
+            assertEquals(seed, Json.decodeFromString<List<Question>>(Files.readString(storage)))
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
     fun `every content mutation requires a bearer token`() = withApi {
         val id = UUID.randomUUID()
         val responses = listOf(
@@ -371,24 +406,34 @@ class ServerTest {
     private fun withApi(block: suspend ApplicationTestBuilder.() -> Unit) {
         val directory = Files.createTempDirectory("currencyquiz-api-test-")
         try {
-            runApi(directory.resolve("questions.json"), block)
+            runApi(directory.resolve("questions.json"), block = block)
         } finally {
             directory.toFile().deleteRecursively()
         }
     }
 
-    private fun runApi(storage: Path, block: suspend ApplicationTestBuilder.() -> Unit) = testApplication {
-        environment {
-            config = MapApplicationConfig(
-                "security.adminUsername" to ADMIN_USERNAME,
-                "security.adminPassword" to ADMIN_PASSWORD,
-                "security.jwtSecret" to JWT_SECRET,
-                "storage.questionsFile" to storage.toString(),
-                "cors.allowedOrigins" to FRONTEND_ORIGIN,
-            )
+    private fun runApi(
+        storage: Path,
+        initializeEmpty: Boolean = true,
+        block: suspend ApplicationTestBuilder.() -> Unit,
+    ) {
+        if (initializeEmpty && !Files.exists(storage)) {
+            Files.createDirectories(storage.toAbsolutePath().parent)
+            Files.writeString(storage, "[]")
         }
-        application { module() }
-        block()
+        testApplication {
+            environment {
+                config = MapApplicationConfig(
+                    "security.adminUsername" to ADMIN_USERNAME,
+                    "security.adminPassword" to ADMIN_PASSWORD,
+                    "security.jwtSecret" to JWT_SECRET,
+                    "storage.questionsFile" to storage.toString(),
+                    "cors.allowedOrigins" to FRONTEND_ORIGIN,
+                )
+            }
+            application { module() }
+            block()
+        }
     }
 
     private suspend fun HttpResponse.json(): JsonElement = Json.parseToJsonElement(bodyAsText())

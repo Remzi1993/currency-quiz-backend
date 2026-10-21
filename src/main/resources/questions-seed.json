@@ -1,0 +1,442 @@
+[
+  {
+    "id": "c72b3aab-633f-4268-88e7-c6ba1c3bb217",
+    "text": "Which currency is used in Japan?",
+    "options": [
+      "Chinese yuan",
+      "Japanese yen",
+      "South Korean won",
+      "Thai baht"
+    ],
+    "correctAnswer": "Japanese yen"
+  },
+  {
+    "id": "82e60cba-23b5-4f15-af3d-f87e10c7dec6",
+    "text": "What is the currency of the United Kingdom?",
+    "options": [
+      "Euro",
+      "Swiss franc",
+      "Pound sterling",
+      "Norwegian krone"
+    ],
+    "correctAnswer": "Pound sterling"
+  },
+  {
+    "id": "d1d5748b-00a0-4674-b092-d7c01001ef54",
+    "text": "Which currency is used in Switzerland?",
+    "options": [
+      "Euro",
+      "Danish krone",
+      "Pound sterling",
+      "Swiss franc"
+    ],
+    "correctAnswer": "Swiss franc"
+  },
+  {
+    "id": "1d435788-c28e-4d90-b621-5762c5bb83df",
+    "text": "What currency would you use for everyday purchases in Australia?",
+    "options": [
+      "New Zealand dollar",
+      "Canadian dollar",
+      "US dollar",
+      "Australian dollar"
+    ],
+    "correctAnswer": "Australian dollar"
+  },
+  {
+    "id": "158d93ec-3ae1-4dac-a4a8-06a1f422cd2f",
+    "text": "Which currency is used in Canada?",
+    "options": [
+      "Canadian dollar",
+      "US dollar",
+      "Australian dollar",
+      "New Zealand dollar"
+    ],
+    "correctAnswer": "Canadian dollar"
+  },
+  {
+    "id": "c34bc579-4d85-4a42-a437-426cc60430e8",
+    "text": "What is the currency of China?",
+    "options": [
+      "Japanese yen",
+      "Renminbi (yuan)",
+      "South Korean won",
+      "Indian rupee"
+    ],
+    "correctAnswer": "Renminbi (yuan)"
+  },
+  {
+    "id": "db8de424-20f4-49f9-9b9e-e01003926db9",
+    "text": "Which currency is used in India?",
+    "options": [
+      "Pakistani rupee",
+      "Bangladeshi taka",
+      "Indian rupee",
+      "Sri Lankan rupee"
+    ],
+    "correctAnswer": "Indian rupee"
+  },
+  {
+    "id": "69919491-2c2b-4c64-81f5-eeb92be48e57",
+    "text": "What is the currency of Brazil?",
+    "options": [
+      "Argentine peso",
+      "Chilean peso",
+      "Brazilian real",
+      "Mexican peso"
+    ],
+    "correctAnswer": "Brazilian real"
+  },
+  {
+    "id": "5f80c58c-22fa-4223-9383-336f0d1de64b",
+    "text": "Which currency is used in Mexico?",
+    "options": [
+      "Brazilian real",
+      "Mexican peso",
+      "Canadian dollar",
+      "Euro"
+    ],
+    "correctAnswer": "Mexican peso"
+  },
+  {
+    "id": "cee80db8-ff23-4ec7-aaf6-8651101a4c01",
+    "text": "What is the currency of South Africa?",
+    "options": [
+      "South African rand",
+      "Kenyan shilling",
+      "Nigerian naira",
+      "Egyptian pound"
+    ],
+    "correctAnswer": "South African rand"
+  },
+  {
+    "id": "f84bf92f-ead6-4abb-beba-d1feae63158d",
+    "text": "Which currency is used in Türkiye?",
+    "options": [
+      "Turkish lira",
+      "Euro",
+      "Romanian leu",
+      "Saudi riyal"
+    ],
+    "correctAnswer": "Turkish lira"
+  },
+  {
+    "id": "54a97366-affb-4baf-83ee-19b850ef64e1",
+    "text": "What is the currency of South Korea?",
+    "options": [
+      "South Korean won",
+      "Japanese yen",
+      "Chinese yuan",
+      "Thai baht"
+    ],
+    "correctAnswer": "South Korean won"
+  },
+  {
+    "id": "aaa5dbba-618e-4c14-b729-622a60422fac",
+    "text": "Which currency is used in Thailand?",
+    "options": [
+      "Vietnamese dong",
+      "Malaysian ringgit",
+      "Philippine peso",
+      "Thai baht"
+    ],
+    "correctAnswer": "Thai baht"
+  },
+  {
+    "id": "e91f8f09-f496-4041-a940-6c6d0f89270a",
+    "text": "What is the currency of Indonesia?",
+    "options": [
+      "Indian rupee",
+      "Indonesian rupiah",
+      "Malaysian ringgit",
+      "Singapore dollar"
+    ],
+    "correctAnswer": "Indonesian rupiah"
+  },
+  {
+    "id": "68c412dc-4727-4132-b4f4-8840e2f74338",
+    "text": "Which currency is used in Vietnam?",
+    "options": [
+      "Thai baht",
+      "Vietnamese dong",
+      "Chinese yuan",
+      "Indonesian rupiah"
+    ],
+    "correctAnswer": "Vietnamese dong"
+  },
+  {
+    "id": "ea3e6449-13a6-4482-b046-d410ec801e69",
+    "text": "What is the currency of Malaysia?",
+    "options": [
+      "Malaysian ringgit",
+      "Singapore dollar",
+      "Indonesian rupiah",
+      "Thai baht"
+    ],
+    "correctAnswer": "Malaysian ringgit"
+  },
+  {
+    "id": "7b52919d-9b4b-449d-b2f6-f56f148e12a6",
+    "text": "Which currency is used in Singapore?",
+    "options": [
+      "Malaysian ringgit",
+      "Singapore dollar",
+      "Philippine peso",
+      "Thai baht"
+    ],
+    "correctAnswer": "Singapore dollar"
+  },
+  {
+    "id": "8fb8f4dd-47ae-4340-9a27-0de50d54684a",
+    "text": "What is the currency of the Philippines?",
+    "options": [
+      "Mexican peso",
+      "Philippine peso",
+      "Indonesian rupiah",
+      "Vietnamese dong"
+    ],
+    "correctAnswer": "Philippine peso"
+  },
+  {
+    "id": "a772d982-a628-40cf-9987-fa470ec2e122",
+    "text": "Which currency is used in Saudi Arabia?",
+    "options": [
+      "Saudi riyal",
+      "UAE dirham",
+      "Egyptian pound",
+      "Turkish lira"
+    ],
+    "correctAnswer": "Saudi riyal"
+  },
+  {
+    "id": "02f8f9a5-a664-47cc-9d1b-ebab9b98c710",
+    "text": "What is the currency of the United Arab Emirates?",
+    "options": [
+      "UAE dirham",
+      "Saudi riyal",
+      "Qatari riyal",
+      "Kuwaiti dinar"
+    ],
+    "correctAnswer": "UAE dirham"
+  },
+  {
+    "id": "bf6161fc-8ca5-4e7b-8021-685742e46e23",
+    "text": "What is the ISO 4217 code for the New Zealand dollar?",
+    "options": [
+      "AUD",
+      "CAD",
+      "NZD",
+      "SGD"
+    ],
+    "correctAnswer": "NZD"
+  },
+  {
+    "id": "843a5336-a151-4f4d-937e-13d04db9e509",
+    "text": "What is the ISO 4217 code for the Norwegian krone?",
+    "options": [
+      "SEK",
+      "DKK",
+      "NOK",
+      "ISK"
+    ],
+    "correctAnswer": "NOK"
+  },
+  {
+    "id": "0939a1ae-b646-4f87-bafe-91e9550152d8",
+    "text": "What is the ISO 4217 code for the Swedish krona?",
+    "options": [
+      "NOK",
+      "DKK",
+      "SEK",
+      "CHF"
+    ],
+    "correctAnswer": "SEK"
+  },
+  {
+    "id": "e3656893-8058-465b-bfd6-34493163d345",
+    "text": "What is the ISO 4217 code for the Danish krone?",
+    "options": [
+      "NOK",
+      "DKK",
+      "SEK",
+      "CZK"
+    ],
+    "correctAnswer": "DKK"
+  },
+  {
+    "id": "7ee330fe-7b34-446d-8406-6c19d7a50407",
+    "text": "What is the ISO 4217 code for the Polish złoty?",
+    "options": [
+      "CZK",
+      "HUF",
+      "PLN",
+      "RON"
+    ],
+    "correctAnswer": "PLN"
+  },
+  {
+    "id": "b19495b6-fad7-4da7-9c72-94eab354b170",
+    "text": "What is the ISO 4217 code for the Czech koruna?",
+    "options": [
+      "DKK",
+      "PLN",
+      "NOK",
+      "CZK"
+    ],
+    "correctAnswer": "CZK"
+  },
+  {
+    "id": "aa4434ae-2544-4b89-9512-726ea1319cca",
+    "text": "What is the ISO 4217 code for the Hungarian forint?",
+    "options": [
+      "PLN",
+      "RON",
+      "HUF",
+      "CHF"
+    ],
+    "correctAnswer": "HUF"
+  },
+  {
+    "id": "b4cd9aff-e10c-4dd2-8aa2-a4347395d6f8",
+    "text": "What is the ISO 4217 code for the Romanian leu?",
+    "options": [
+      "HUF",
+      "PLN",
+      "EUR",
+      "RON"
+    ],
+    "correctAnswer": "RON"
+  },
+  {
+    "id": "e8862d35-ee45-451b-8427-2a0dd5c5206f",
+    "text": "What is the ISO 4217 code for the Kenyan shilling?",
+    "options": [
+      "TZS",
+      "KES",
+      "UGX",
+      "ZAR"
+    ],
+    "correctAnswer": "KES"
+  },
+  {
+    "id": "f1d213db-7a11-46a8-ba00-0b449f3e7bcd",
+    "text": "What is the ISO 4217 code for the Egyptian pound?",
+    "options": [
+      "GBP",
+      "SDG",
+      "EGP",
+      "NGN"
+    ],
+    "correctAnswer": "EGP"
+  },
+  {
+    "id": "5c530580-9a6d-49c1-b879-8981a64cbe42",
+    "text": "The taka is the currency of which country?",
+    "options": [
+      "Bangladesh",
+      "Pakistan",
+      "Nepal",
+      "Sri Lanka"
+    ],
+    "correctAnswer": "Bangladesh"
+  },
+  {
+    "id": "86cb4b12-648b-467e-b6db-96095475ff58",
+    "text": "The currency code PKR belongs to which country?",
+    "options": [
+      "Pakistan",
+      "India",
+      "Nepal",
+      "Sri Lanka"
+    ],
+    "correctAnswer": "Pakistan"
+  },
+  {
+    "id": "114d6863-8a3f-44c1-ac88-c0ab13f68def",
+    "text": "The currency code LKR belongs to which country?",
+    "options": [
+      "Bangladesh",
+      "Sri Lanka",
+      "India",
+      "Nepal"
+    ],
+    "correctAnswer": "Sri Lanka"
+  },
+  {
+    "id": "0b0bee06-b480-4f96-9c10-d10da4f46cca",
+    "text": "The currency code NPR belongs to which country?",
+    "options": [
+      "Pakistan",
+      "Bangladesh",
+      "Bhutan",
+      "Nepal"
+    ],
+    "correctAnswer": "Nepal"
+  },
+  {
+    "id": "c3eb21ae-a555-416c-986b-50f8fe2ecca0",
+    "text": "Which of these countries uses the dirham as its national currency?",
+    "options": [
+      "Egypt",
+      "Nigeria",
+      "Kenya",
+      "Morocco"
+    ],
+    "correctAnswer": "Morocco"
+  },
+  {
+    "id": "fa552cd3-d518-4af8-a7f9-3459f216d3d9",
+    "text": "The naira is the currency of which country?",
+    "options": [
+      "Ghana",
+      "Kenya",
+      "South Africa",
+      "Nigeria"
+    ],
+    "correctAnswer": "Nigeria"
+  },
+  {
+    "id": "66834e30-4c0a-4c2a-ab6f-b3bbaad27095",
+    "text": "The cedi is the currency of which country?",
+    "options": [
+      "Ghana",
+      "Nigeria",
+      "Morocco",
+      "Egypt"
+    ],
+    "correctAnswer": "Ghana"
+  },
+  {
+    "id": "62b61a0e-cd10-4413-a9ee-a3939ea0e52c",
+    "text": "The currency code ARS belongs to which country?",
+    "options": [
+      "Brazil",
+      "Chile",
+      "Mexico",
+      "Argentina"
+    ],
+    "correctAnswer": "Argentina"
+  },
+  {
+    "id": "8fcd8827-6877-4d79-aa33-26dfc57757b9",
+    "text": "The currency code CLP belongs to which country?",
+    "options": [
+      "Canada",
+      "China",
+      "Chile",
+      "Argentina"
+    ],
+    "correctAnswer": "Chile"
+  },
+  {
+    "id": "36d3d3bf-5e42-4cc3-8030-7e18a0eaf01b",
+    "text": "Which currency is used in both Germany and the Netherlands?",
+    "options": [
+      "Pound sterling",
+      "Swiss franc",
+      "Danish krone",
+      "Euro"
+    ],
+    "correctAnswer": "Euro"
+  }
+]

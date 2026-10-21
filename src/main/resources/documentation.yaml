@@ -20,7 +20,7 @@ paths:
       summary: List public questions
       responses:
         "200":
-          description: Questions without correct answers. Initially an empty array.
+          description: Questions without correct answers. New installations start with 40 sample questions.
           content:
             application/json:
               schema:
