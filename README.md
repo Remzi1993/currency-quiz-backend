@@ -159,3 +159,7 @@ Expose the API over HTTPS in deployment and keep secrets in your hosting environ
 Tests provide isolated credentials and temporary storage; no production environment variables are required.
 
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
+
+## Learning outcomes
+
+My [Full-Stack Developer notes](docs/full-stack-developer/readme.md) connect this side project to the school's learning outcomes, starting with secure coding practices.

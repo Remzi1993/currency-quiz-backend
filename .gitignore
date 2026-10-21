@@ -162,4 +162,4 @@ gradle-app.setting
 .env
 .env.*
 !.env.example
-/data/
+/data
