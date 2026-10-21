@@ -1,6 +1,6 @@
 # Secure coding practices
 
-**Project:** Currency auiz API
+**Project:** Currency quiz API
 
 ## My goal and choices
 
@@ -67,4 +67,4 @@ I connect the requirements to concrete measures while keeping the limits visible
 | GDPR: data minimisation and protection by design | No player registration, stored player profiles or answer history.                       | Check hosting logs, retention and the processing purpose before deployment.                  |
 | GDPR: appropriate security                       | Restricted admin operations, token verification and bounded input.                      | Assess deployment risks, HTTPS, access to logs and operational procedures.                   |
 
-Connection IPs used for rate limiting can still be personal data. Shared school networks may group students under one limit. I need feedback from a player and content administrator on that trade-off; no conversations are recorded yet.
+Connection IPs used for rate limiting can still be personal data. Shared school networks may group students under one limit.
