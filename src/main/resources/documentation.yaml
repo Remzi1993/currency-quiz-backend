@@ -1,10 +1,8 @@
 openapi: "3.0.3"
 info:
-  title: Currency Quiz API
+  title: Currency quiz API
   description: >-
-    Play the quiz anonymously and manage questions with an admin JWT.
-    Public question responses never contain correct answers.
-    JSON bodies are required for login, answers, creation, and updates.
+    A currency quiz, questions can be manage with an admin JWT.
   version: "1.0.0"
 servers:
   - url: /
@@ -17,7 +15,7 @@ paths:
     get:
       tags: [Quiz]
       operationId: listQuestions
-      summary: List public questions
+      summary: List of questions
       responses:
         "200":
           description: Questions without correct answers. New installations start with 40 sample questions.
@@ -26,7 +24,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/PublicQuestion"
+                  $ref: "#/components/schemas/Question"
         "500":
           $ref: "#/components/responses/InternalError"
     post:
@@ -72,14 +70,14 @@ paths:
     get:
       tags: [Quiz]
       operationId: getQuestion
-      summary: Get a public question
+      summary: Get a specific question
       responses:
         "200":
           description: Question without its correct answer.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PublicQuestion"
+                $ref: "#/components/schemas/Question"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
@@ -265,7 +263,7 @@ components:
           schema:
             $ref: "#/components/schemas/ApiError"
   schemas:
-    PublicQuestion:
+    Question:
       type: object
       required: [id, text, options]
       properties:
@@ -280,7 +278,7 @@ components:
           $ref: "#/components/schemas/Options"
     AdminQuestion:
       allOf:
-        - $ref: "#/components/schemas/PublicQuestion"
+        - $ref: "#/components/schemas/Question"
         - type: object
           required: [correctAnswer]
           properties:
