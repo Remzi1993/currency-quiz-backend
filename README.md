@@ -6,7 +6,7 @@ A Ktor REST API for playing a currency quiz without an account and managing ques
 
 Use JDK 25 to build and run the API. The build uses a Java 25 toolchain and the included Gradle wrapper.
 
-Create your local configuration once in PowerShell 7+:
+Create local configuration - example in PowerShell 7+:
 
 ```powershell
 Copy-Item .env.example .env
@@ -21,8 +21,8 @@ Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in 
 
 After saving `.env`, start the server from the project root:
 
-```powershell
-.\gradlew.bat run
+```sh
+./gradlew run
 ```
 
 The application loads `.env` automatically on each start. You do not need to set variables in the terminal again. In IntelliJ, select the shared **Currency Quiz API** run configuration. It runs `info.remzi.currencyquiz.MainKt` with the project root as its working directory. Launching `io.ktor.server.netty.EngineMain` directly bypasses the `.env` loader and can cause a `Missing required configuration: security.adminUsername` error.
@@ -31,17 +31,17 @@ The API listens on `http://localhost:8080`. Interactive Swagger documentation is
 
 The server requires credentials and a signing secret at startup; there are no default admin credentials. Keep the same JWT secret between restarts if existing tokens should remain valid. Changing it invalidates previously issued tokens.
 
-| Variable | Required | Default / constraints |
-| --- | --- | --- |
-| `PORT` | No | `8080` |
-| `ADMIN_USERNAME` | Yes | Nonblank; at most 100 characters |
-| `ADMIN_PASSWORD` | Yes | 12–1024 characters; must not be blank |
-| `JWT_SECRET` | Yes | At least 32 UTF-8 bytes; use a random secret |
-| `JWT_ISSUER` | No | `currencyquiz-api` |
-| `JWT_AUDIENCE` | No | `currencyquiz-admin` |
-| `JWT_TOKEN_TTL_SECONDS` | No | `3600`; from 1 to 86400 seconds |
-| `CORS_ALLOWED_ORIGINS` | No | Empty; comma-separated HTTP(S) origins, such as `http://localhost:5173,https://quiz.example.com` |
-| `QUESTIONS_FILE` | No | `data/questions.json`, relative to the working directory |
+| Variable                | Required | Default / constraints                                                                            |
+|-------------------------|----------|--------------------------------------------------------------------------------------------------|
+| `PORT`                  | No       | `8080`                                                                                           |
+| `ADMIN_USERNAME`        | Yes      | Nonblank; at most 100 characters                                                                 |
+| `ADMIN_PASSWORD`        | Yes      | 12–1024 characters; must not be blank                                                            |
+| `JWT_SECRET`            | Yes      | At least 32 UTF-8 bytes; use a random secret                                                     |
+| `JWT_ISSUER`            | No       | `currencyquiz-api`                                                                               |
+| `JWT_AUDIENCE`          | No       | `currencyquiz-admin`                                                                             |
+| `JWT_TOKEN_TTL_SECONDS` | No       | `3600`; from 1 to 86400 seconds                                                                  |
+| `CORS_ALLOWED_ORIGINS`  | No       | Empty; comma-separated HTTP(S) origins, such as `http://localhost:5173,https://quiz.example.com` |
+| `QUESTIONS_FILE`        | No       | `data/questions.json`, relative to the working directory                                         |
 
 [.env.example](.env.example) lists the supported variables. `.env` is read from the process working directory and supports comments and double-quoted values. Existing OS environment variables and explicit JVM system properties take precedence over values in `.env`. A missing `.env` is allowed when settings come from your IDE or hosting environment; malformed entries cause a configuration error. `.env` is ignored by Git. Do not commit credentials or signing secrets.
 
@@ -49,21 +49,21 @@ The server requires credentials and a signing secret at startup; there are no de
 
 All request bodies use `Content-Type: application/json`.
 
-| Method | Path | Access | Result |
-| --- | --- | --- | --- |
-| `GET` | `/api/v1/questions` | Public | `200`: question array without answers |
-| `GET` | `/api/v1/questions/{id}` | Public | `200`: one question without its answer |
-| `POST` | `/api/v1/questions/{id}/answers` | Public | `200`: `{ "correct": true }` or `{ "correct": false }` |
-| `POST` | `/api/v1/auth/login` | Admin credentials | `200`: JWT access token |
-| `POST` | `/api/v1/questions` | Admin JWT | `201`: created question; `Location` identifies its public URL |
-| `PATCH` | `/api/v1/questions/{id}` | Admin JWT | `200`: updated question |
-| `DELETE` | `/api/v1/questions/{id}` | Admin JWT | `204`: deleted, without a response body |
+| Method   | Path                             | Access            | Result                                                        |
+|----------|----------------------------------|-------------------|---------------------------------------------------------------|
+| `GET`    | `/api/v1/questions`              | Public            | `200`: question array without answers                         |
+| `GET`    | `/api/v1/questions/{id}`         | Public            | `200`: one question without its answer                        |
+| `POST`   | `/api/v1/questions/{id}/answers` | Public            | `200`: `{ "correct": true }` or `{ "correct": false }`        |
+| `POST`   | `/api/v1/auth/login`             | Admin credentials | `200`: JWT access token                                       |
+| `POST`   | `/api/v1/questions`              | Admin JWT         | `201`: created question; `Location` identifies its public URL |
+| `PATCH`  | `/api/v1/questions/{id}`         | Admin JWT         | `200`: updated question                                       |
+| `DELETE` | `/api/v1/questions/{id}`         | Admin JWT         | `204`: deleted, without a response body                       |
 
 Management responses include `correctAnswer`. Send the token as `Authorization: Bearer <accessToken>` when creating, editing, or deleting a question. Tokens expire after the configured lifetime; log in again to obtain a new one.
 
-### Example flow
+### Example flow with PowerShell 7+
 
-In another PowerShell 7 terminal, enter the same admin credentials saved in `.env`, then log in and create a question. The application loads `.env` for itself; it does not populate your terminal's environment.
+In another terminal, enter the same admin credentials saved in `.env`, then log in and create a question. The application loads `.env` for itself; it does not populate your terminal's environment.
 
 ```powershell
 $baseUrl = "http://localhost:8080/api/v1"
@@ -96,7 +96,7 @@ Invoke-RestMethod -Method Patch -Uri "$baseUrl/questions/$($question.id)" `
 Invoke-RestMethod -Method Delete -Uri "$baseUrl/questions/$($question.id)" -Headers $headers
 ```
 
-A public question looks like this:
+A question looks like this:
 
 ```json
 {
@@ -124,14 +124,14 @@ A valid but incorrect answer returns `200 OK` with `{"correct":false}`. Errors u
 
 The `details` array is empty when there are no additional validation reasons. The status indicates the failure:
 
-| Status | Meaning |
-| --- | --- |
-| `400` | Invalid JSON, request fields, or question ID |
-| `401` | Invalid credentials or missing, expired, or invalid admin token |
-| `404` | Question or route does not exist |
-| `415` | Unsupported request content type |
-| `429` | Rate limit exceeded; respect `Retry-After` |
-| `500` | Unexpected server error; internal details are logged and are not returned |
+| Status | Meaning                                                                   |
+|--------|---------------------------------------------------------------------------|
+| `400`  | Invalid JSON, request fields, or question ID                              |
+| `401`  | Invalid credentials or missing, expired, or invalid admin token           |
+| `404`  | Question or route does not exist                                          |
+| `415`  | Unsupported request content type                                          |
+| `429`  | Rate limit exceeded; respect `Retry-After`                                |
+| `500`  | Unexpected server error; internal details are logged and are not returned |
 
 Login allows 5 requests per minute per client IP. Answer submission allows 30 requests per minute per client IP, shared across question IDs. These limits run in memory and reset when the server restarts.
 
@@ -151,11 +151,11 @@ Expose the API over HTTPS in deployment and keep secrets in your hosting environ
 
 ## Build and test
 
-```powershell
-.\gradlew.bat test
-.\gradlew.bat build
+```sh
+./gradlew test
+./gradlew build
 ```
 
-On macOS/Linux, use `./gradlew` in place of `.\gradlew.bat`. Tests provide isolated credentials and temporary storage; no production environment variables are required.
+Tests provide isolated credentials and temporary storage; no production environment variables are required.
 
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
