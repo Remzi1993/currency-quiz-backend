@@ -1,4 +1,4 @@
-# Currency Quiz API
+# Currency quiz API
 
 A Ktor REST API for playing a currency quiz without an account and managing questions with an admin JWT. Questions have a text prompt, answer options, and one correct answer. Public responses never include the correct answer; answers are checked on the server.
 
@@ -161,5 +161,5 @@ Tests provide isolated credentials and temporary storage; no production environm
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
 
 ## Learning outcomes
-
-My [Full-Stack Developer notes](docs/full-stack-developer/readme.md) connect this side project to the school's learning outcomes, starting with secure coding practices.
+- Designing & Realising 
+  - See my article about: [Secure coding practices](docs/designing-and-realising/secure-coding-practices/OWASP.md)
