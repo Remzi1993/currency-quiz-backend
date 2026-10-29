@@ -334,7 +334,7 @@ class ServerTest {
         assertEquals(HttpStatusCode.OK, specification.status)
         val yaml = specification.bodyAsText()
         assertContains(yaml, "openapi:")
-        assertContains(yaml, "Currency Quiz API")
+        assertContains(yaml, "title: Currency quiz API")
         assertContains(yaml, "/api/v1/questions:")
         assertContains(yaml, "/api/v1/auth/login:")
     }

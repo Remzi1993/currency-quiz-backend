@@ -1,0 +1,21 @@
+services:
+  api:
+    build:
+      context: .
+    image: currencyquiz-backend:local
+    env_file:
+      - .env
+    environment:
+      # The host's PORT only changes the published port below.
+      PORT: "8080"
+      # Always keep container data inside the persistent volume.
+      QUESTIONS_FILE: /app/data/questions.json
+    ports:
+      - "127.0.0.1:${PORT:-8080}:8080"
+    volumes:
+      - questions-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+volumes:
+  questions-data:

@@ -1,0 +1,18 @@
+# Allow only build inputs into the context. Keep secrets, mutable questions,
+# host build output, IDE files and Git history out of every image layer.
+**
+!build.gradle.kts
+!settings.gradle.kts
+!gradle.properties
+!gradlew
+!gradle/
+!gradle/**
+!src/
+!src/**
+
+# These stay excluded even if accidentally placed under src/ or gradle/.
+**/.env
+**/.env.*
+**/build/
+**/.gradle/
+**/.kotlin/

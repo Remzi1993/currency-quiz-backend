@@ -4,7 +4,9 @@ A Ktor REST API for playing a currency quiz without an account and managing ques
 
 ## Run locally
 
-Use JDK 25 to build and run the API. The build uses a Java 25 toolchain and the included Gradle wrapper.
+Docker Compose builds and runs the API with Java 25, so you do not need Java or Gradle installed locally. A native run with JDK 25 is also available.
+
+### Configuration
 
 Create local configuration - example in PowerShell 7+:
 
@@ -19,13 +21,40 @@ notepad .env
 
 Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. `CORS_ALLOWED_ORIGINS` can contain your frontend's origin.
 
-After saving `.env`, start the server from the project root:
+### Docker Compose
+
+Start Docker with Compose support, then run this from the project root after saving `.env`:
+
+```sh
+docker compose up -d --build --wait
+```
+
+The image build runs the tests and packages the application. Compose starts the API in the background and waits for its HTTP health check at `/` to pass. The published port is bound to `127.0.0.1`. Open `http://localhost:8080`, or use the host port set by `PORT` in `.env`.
+
+Compose reads `.env` as runtime environment variables. It sets the container's `PORT` to `8080` and `QUESTIONS_FILE` to `/app/data/questions.json`. The named volume `questions-data` stores the questions outside the container. A new volume receives the 40 sample questions; later admin edits survive container recreation. Your host's `data/questions.json` is separate from this volume.
+
+Useful commands:
+
+```sh
+docker compose logs -f api
+docker compose stop
+docker compose up -d
+docker compose down
+```
+
+`stop` stops the API; `up -d` starts it again. `down` removes the container and network but keeps the question volume. Rebuild after code changes with `docker compose up -d --build --wait`.
+
+The `unless-stopped` policy restarts an existing container when Docker starts, unless you stopped it manually. Enable Docker Desktop startup at sign-in if you want this on Windows. After a manual stop or `down`, run `docker compose up -d` again. See [Docker's restart-policy documentation](https://docs.docker.com/engine/containers/start-containers-automatically/).
+
+### Native JVM
+
+Use JDK 25 and the included Gradle wrapper. After saving `.env`, start the server from the project root:
 
 ```sh
 ./gradlew run
 ```
 
-The application loads `.env` automatically on each start. You do not need to set variables in the terminal again. In IntelliJ, select the shared **Currency Quiz API** run configuration. It runs `info.remzi.currencyquiz.MainKt` with the project root as its working directory. Launching `io.ktor.server.netty.EngineMain` directly bypasses the `.env` loader and can cause a `Missing required configuration: security.adminUsername` error.
+For native runs, the application loads `.env` automatically on each start. You do not need to set variables in the terminal again. In IntelliJ, select the shared **Currency Quiz API** run configuration. It runs `info.remzi.currencyquiz.MainKt` with the project root as its working directory. Launching `io.ktor.server.netty.EngineMain` directly bypasses the `.env` loader and can cause a `Missing required configuration: security.adminUsername` error.
 
 The API listens on `http://localhost:8080`. Interactive Swagger documentation is available at `http://localhost:8080/openapi`.
 
@@ -149,6 +178,16 @@ This repository is intended for one server process accessing the questions file.
 
 Expose the API over HTTPS in deployment and keep secrets in your hosting environment. CORS permits only the configured browser origins; it does not grant admin access. Rate limits use the connection's client IP; behind a reverse proxy, configure trusted proxy handling before relying on per-player limits. Never trust arbitrary client-supplied forwarding headers.
 
+### Render preparation
+
+For a future Render web service, choose Docker and use the repository's root `Dockerfile`. Supply the admin credentials, JWT secret and other runtime settings through Render's dashboard. Render builds the Dockerfile directly; `compose.yaml` is for local use. See [Render's Docker setup](https://render.com/docs/docker).
+
+Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP health-check path to `/`. See [Render's port requirements](https://render.com/docs/web-services#port-binding) and [health-check settings](https://render.com/docs/health-checks).
+
+Set `QUESTIONS_FILE=/app/data/questions.json` and mount a persistent disk at `/app/data` to retain admin edits across deploys and restarts. Render's persistent disks require a paid service; without a disk, local file changes are lost. See [Render's persistent-disk documentation](https://render.com/docs/disks).
+
+GitHub checks and an actual Render deployment are later steps.
+
 ## Build and test
 
 ```sh
@@ -161,5 +200,8 @@ Tests provide isolated credentials and temporary storage; no production environm
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
 
 ## Learning outcomes
+
 - Designing & Realising 
   - See my article about: [Secure coding practices](docs/designing-and-realising/secure-coding-practices/OWASP.md)
+- Managing & Collaborating
+  - [Containerization](docs/managing-and-collaborating/ci-cd/containerization.md)
