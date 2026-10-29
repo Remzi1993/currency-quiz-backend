@@ -9,6 +9,8 @@ COPY gradle ./gradle
 RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
 
 COPY src ./src
+COPY shared/openapi ./shared/openapi
+COPY shared/generators ./shared/generators
 RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
     ./gradlew --no-daemon test shadowJar
 

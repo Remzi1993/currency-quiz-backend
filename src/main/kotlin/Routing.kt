@@ -1,5 +1,7 @@
 package info.remzi.currencyquiz
 
+import info.remzi.currencyquiz.contract.*
+
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.auth.*
@@ -20,7 +22,7 @@ fun Application.configureRouting(repository: QuestionRepository, authService: Au
                     call.response.headers.append(HttpHeaders.CacheControl, "no-store")
                     val token = authService.login(request.username, request.password)
                     if (token == null) {
-                        call.respond(HttpStatusCode.Unauthorized, ApiError("invalid_credentials", "Invalid username or password"))
+                        call.respond(HttpStatusCode.Unauthorized, apiError("invalid_credentials", "Invalid username or password"))
                     } else {
                         call.respond(token)
                     }
@@ -47,13 +49,13 @@ fun Application.configureRouting(repository: QuestionRepository, authService: Au
                     val request = call.receive<CreateQuestionRequest>()
                     val question = repository.create(request)
                     call.response.headers.append(HttpHeaders.Location, "/api/v1/questions/${question.id}")
-                    call.respond(HttpStatusCode.Created, question)
+                    call.respond(HttpStatusCode.Created, question.adminView())
                 }
                 patch("/questions/{id}") {
                     val id = call.questionId()
                     val request = call.receive<UpdateQuestionRequest>()
                     val question = repository.update(id, request) ?: throw QuestionNotFoundException()
-                    call.respond(question)
+                    call.respond(question.adminView())
                 }
                 delete("/questions/{id}") {
                     if (!repository.delete(call.questionId())) throw QuestionNotFoundException()

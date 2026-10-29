@@ -1,5 +1,8 @@
 package info.remzi.currencyquiz
 
+import info.remzi.currencyquiz.contract.CreateQuestionRequest
+import info.remzi.currencyquiz.contract.UpdateQuestionRequest
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -54,7 +57,7 @@ class FileQuestionRepository(file: Path) : QuestionRepository {
 
     override suspend fun create(request: CreateQuestionRequest): Question = withContext(Dispatchers.IO) {
         mutex.withLock {
-            val question = validatedQuestion(UUID.randomUUID().toString(), request.text, request.options, request.correctAnswer)
+            val question = validatedQuestion(UUID.randomUUID().toString(), request.text, request.options.toList(), request.correctAnswer)
             val updated = questions + (question.id to question)
             persist(updated.values.toList())
             questions = updated
@@ -66,7 +69,7 @@ class FileQuestionRepository(file: Path) : QuestionRepository {
         mutex.withLock {
             val existing = questions[id] ?: return@withLock null
             val question = validatedQuestion(
-                id, request.text ?: existing.text, request.options ?: existing.options,
+                id, request.text ?: existing.text, request.options?.toList() ?: existing.options,
                 request.correctAnswer ?: existing.correctAnswer,
             )
             val updated = questions + (id to question)

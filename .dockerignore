@@ -9,6 +9,11 @@
 !gradle/**
 !src/
 !src/**
+!shared/
+!shared/openapi/
+!shared/openapi/**
+!shared/generators/
+!shared/generators/**
 
 # These stay excluded even if accidentally placed under src/ or gradle/.
 **/.env

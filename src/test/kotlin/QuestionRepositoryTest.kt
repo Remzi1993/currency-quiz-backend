@@ -1,5 +1,8 @@
 package info.remzi.currencyquiz
 
+import info.remzi.currencyquiz.contract.CreateQuestionRequest
+import info.remzi.currencyquiz.contract.UpdateQuestionRequest
+
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
@@ -19,7 +22,7 @@ class QuestionRepositoryTest {
             val repository = FileQuestionRepository(storage)
             val created = (1..20).map { number ->
                 async {
-                    repository.create(CreateQuestionRequest("Currency question $number?", listOf("JPY", "EUR"), "JPY"))
+                    repository.create(CreateQuestionRequest("Currency question $number?", arrayOf("JPY", "EUR"), "JPY"))
                 }
             }.awaitAll()
             assertEquals(20, created.map { it.id }.toSet().size)

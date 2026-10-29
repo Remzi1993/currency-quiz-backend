@@ -2,13 +2,40 @@
 
 A Ktor REST API for playing a currency quiz without an account and managing questions with an admin JWT. Questions have a text prompt, answer options, and one correct answer. Public responses never include the correct answer; answers are checked on the server.
 
+## Shared API contract
+
+The [OpenAPI contract](shared/openapi/currency-quiz.v1.yaml) lives in the separate `currency-quiz-shared` repository, included here as the `shared/` Git submodule. It defines the routes, authentication, request bodies, responses and errors. The backend pins a specific shared-repository commit.
+
+Initialize the pinned submodule after cloning, and update it after pulling a changed pin. This command works in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+git submodule update --init --recursive
+```
+
+The shared repository is currently local only. This workspace has a local URL override pointing to the sibling `currency-quiz-shared` checkout. The relative `.gitmodules` URL, `../currency-quiz-shared.git`, is intended for the future shared remote. Publish that repository before expecting recursive clones to work on another machine.
+
+Normal Gradle builds generate Kotlin DTOs with OpenAPI Generator 7.26.0 into `build/generated/openapi`, in package `info.remzi.currencyquiz.contract`. `test` and `check` also validate the specification. Resource processing bundles the same specification as `documentation.yaml` for Swagger; there is no second hand-maintained copy.
+
+The shared npm package, `@currency-quiz/contract`, uses openapi-typescript 7.13.0 to generate committed declarations at `shared/generated/typescript/schema.d.ts`. The future Vue frontend can import those types from its own `shared/` submodule or install the private package locally as a development dependency. No frontend has been created yet. Generated types do not validate incoming HTTP data at runtime.
+
+When checking or changing the TypeScript contract, install Node.js/npm and run these commands from the backend root. They work in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+npm --prefix shared ci
+npm --prefix shared run check
+```
+
+Edit the OpenAPI source and regenerate instead of editing generated models. See the [shared repository README](shared/README.md) for generation, frontend imports and the contract-update workflow. Commit a shared change before deliberately updating each consumer's submodule pin.
+
+Native Gradle tests, including request/response contract tests, and `shadowJar` have passed. Shared-contract linting, TypeScript generation and the example consumer's type check have also passed. Docker verification is still pending. The frontend and Postman/Bruno CI checks remain future work.
+
 ## Run locally
 
 Docker Compose builds and runs the API with Java 25, so you do not need Java or Gradle installed locally. A native run with JDK 25 is also available.
 
 ### Configuration
 
-Create local configuration - example in PowerShell 7+:
+Create local configuration once. In **PowerShell 7+ on Windows**:
 
 ```powershell
 Copy-Item .env.example .env
@@ -19,11 +46,20 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
+In **Linux/Bash**:
+
+```bash
+cp .env.example .env
+openssl rand -base64 48
+```
+
+Open `.env` in your editor and paste the generated value into `JWT_SECRET`.
+
 Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. `CORS_ALLOWED_ORIGINS` can contain your frontend's origin.
 
 ### Docker Compose
 
-Start Docker with Compose support, then run this from the project root after saving `.env`:
+Start Docker with Compose support, then run this from the project root after initializing `shared/` and saving `.env`. The command works in **PowerShell 7+ and Linux/Bash**:
 
 ```sh
 docker compose up -d --build --wait
@@ -33,7 +69,7 @@ The image build runs the tests and packages the application. Compose starts the 
 
 Compose reads `.env` as runtime environment variables. It sets the container's `PORT` to `8080` and `QUESTIONS_FILE` to `/app/data/questions.json`. The named volume `questions-data` stores the questions outside the container. A new volume receives the 40 sample questions; later admin edits survive container recreation. Your host's `data/questions.json` is separate from this volume.
 
-Useful commands:
+Useful commands for **PowerShell 7+ and Linux/Bash**:
 
 ```sh
 docker compose logs -f api
@@ -48,7 +84,7 @@ The `unless-stopped` policy restarts an existing container when Docker starts, u
 
 ### Native JVM
 
-Use JDK 25 and the included Gradle wrapper. After saving `.env`, start the server from the project root:
+Use JDK 25 and the included Gradle wrapper. After saving `.env`, start the server from the project root. This command works in **PowerShell 7+ and Linux/Bash**:
 
 ```sh
 ./gradlew run
@@ -125,6 +161,35 @@ Invoke-RestMethod -Method Patch -Uri "$baseUrl/questions/$($question.id)" `
 Invoke-RestMethod -Method Delete -Uri "$baseUrl/questions/$($question.id)" -Headers $headers
 ```
 
+### Example flow with Linux/Bash
+
+This equivalent example uses `curl` and `jq`:
+
+```bash
+base_url="http://localhost:8080/api/v1"
+read -r -p "Admin username: " admin_username
+read -r -s -p "Admin password: " admin_password
+printf '\n'
+login=$(curl --fail-with-body --silent --show-error "$base_url/auth/login" \
+  -H 'Content-Type: application/json' \
+  --data "$(jq -n --arg username "$admin_username" --arg password "$admin_password" \
+    '{username: $username, password: $password}')")
+token=$(printf '%s' "$login" | jq -r '.accessToken')
+question=$(curl --fail-with-body --silent --show-error "$base_url/questions" \
+  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  --data '{"text":"Which currency is used in Japan?","options":["USD","EUR","JPY","GBP"],"correctAnswer":"JPY"}')
+question_id=$(printf '%s' "$question" | jq -r '.id')
+
+curl --fail-with-body --silent --show-error "$base_url/questions"
+curl --fail-with-body --silent --show-error "$base_url/questions/$question_id/answers" \
+  -H 'Content-Type: application/json' --data '{"answer":"JPY"}'
+curl --fail-with-body --silent --show-error -X PATCH "$base_url/questions/$question_id" \
+  -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+  --data '{"text":"What is the currency of Japan?"}'
+curl --fail-with-body --silent --show-error -X DELETE "$base_url/questions/$question_id" \
+  -H "Authorization: Bearer $token"
+```
+
 A question looks like this:
 
 ```json
@@ -190,6 +255,8 @@ GitHub checks and an actual Render deployment are later steps.
 
 ## Build and test
 
+These commands work in **PowerShell 7+ and Linux/Bash**. Generation and OpenAPI validation run as part of the build:
+
 ```sh
 ./gradlew test
 ./gradlew build
@@ -202,6 +269,7 @@ The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authe
 ## Learning outcomes
 
 - Designing & Realising 
-  - See my article about: [Secure coding practices](docs/designing-and-realising/secure-coding-practices/OWASP.md)
+  - [Secure coding practices](docs/designing-and-realising/secure-coding-practices/OWASP.md)
+  - [API design & contract-first development](docs/designing-and-realising/API/API-design-and-contract-first-development.md)
 - Managing & Collaborating
   - [Containerization](docs/managing-and-collaborating/ci-cd/containerization.md)

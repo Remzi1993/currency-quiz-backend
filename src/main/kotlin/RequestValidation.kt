@@ -1,5 +1,7 @@
 package info.remzi.currencyquiz
 
+import info.remzi.currencyquiz.contract.*
+
 import io.ktor.server.application.*
 import io.ktor.server.plugins.requestvalidation.*
 import java.util.Locale
@@ -24,7 +26,7 @@ private fun List<String>.validationResult(): ValidationResult =
 fun Application.configureRequestValidation() {
     install(RequestValidation) {
         validate<CreateQuestionRequest> { question ->
-            questionValidationErrors(question.text, question.options, question.correctAnswer).validationResult()
+            questionValidationErrors(question.text, question.options.toList(), question.correctAnswer).validationResult()
         }
         validate<UpdateQuestionRequest> { patch ->
             buildList {

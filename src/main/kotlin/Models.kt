@@ -1,39 +1,18 @@
 package info.remzi.currencyquiz
 
 import kotlinx.serialization.Serializable
+import info.remzi.currencyquiz.contract.AdminQuestion
+import info.remzi.currencyquiz.contract.ApiError
+import info.remzi.currencyquiz.contract.PublicQuestion
 
 @Serializable
 data class Question(val id: String, val text: String, val options: List<String>, val correctAnswer: String) {
-    fun publicView() = PublicQuestion(id, text, options)
+    fun publicView() = PublicQuestion(id, text, options.toTypedArray())
+    fun adminView() = AdminQuestion(id, text, options.toTypedArray(), correctAnswer)
 }
-
-@Serializable
-data class PublicQuestion(val id: String, val text: String, val options: List<String>)
-
-@Serializable
-data class CreateQuestionRequest(val text: String, val options: List<String>, val correctAnswer: String)
-
-@Serializable
-data class UpdateQuestionRequest(
-    val text: String? = null,
-    val options: List<String>? = null,
-    val correctAnswer: String? = null,
-)
-
-@Serializable
-data class AnswerRequest(val answer: String)
-
-@Serializable
-data class AnswerResponse(val correct: Boolean)
-
-@Serializable
-data class LoginRequest(val username: String, val password: String)
-
-@Serializable
-data class TokenResponse(val accessToken: String, val tokenType: String = "Bearer", val expiresIn: Long)
-
-@Serializable
-data class ApiError(val code: String, val message: String, val details: List<String> = emptyList())
 
 class InvalidQuestionException(val reasons: List<String>) : RuntimeException("Invalid question")
 class QuestionNotFoundException : RuntimeException("Question not found")
+
+internal fun apiError(code: String, message: String, details: List<String> = emptyList()) =
+    ApiError(code, message, details.toTypedArray())

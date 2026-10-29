@@ -1,5 +1,7 @@
 package info.remzi.currencyquiz
 
+import info.remzi.currencyquiz.contract.TokenResponse
+
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.http.HttpHeaders
@@ -66,7 +68,7 @@ fun Application.configureSecurity(settings: ApiSettings) {
                 call.response.header(HttpHeaders.WWWAuthenticate, "Bearer realm=\"currencyquiz-admin\"")
                 call.respond(
                     HttpStatusCode.Unauthorized,
-                    ApiError(code = "unauthorized", message = "A valid admin access token is required"),
+                    apiError(code = "unauthorized", message = "A valid admin access token is required"),
                 )
             }
         }
