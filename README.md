@@ -202,9 +202,14 @@ A question looks like this:
 
 ```json
 {
-  "id": "58d6497e-227a-4bc4-938e-159f449df87e",
+  "id": "c72b3aab-633f-4268-88e7-c6ba1c3bb217",
   "text": "Which currency is used in Japan?",
-  "options": ["USD", "EUR", "JPY", "GBP"]
+  "options": [
+    "Chinese yuan",
+    "Japanese yen",
+    "South Korean won",
+    "Thai baht"
+  ]
 }
 ```
 

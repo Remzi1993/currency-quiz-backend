@@ -17,4 +17,4 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "currencyquiz-backend"
+rootProject.name = "currency-quiz-backend"

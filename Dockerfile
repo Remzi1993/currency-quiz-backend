@@ -25,7 +25,7 @@ RUN apt-get update \
     && mkdir -p /app/data \
     && chown quiz:quiz /app/data
 
-COPY --from=build /workspace/build/libs/currencyquiz-backend-all.jar /app/app.jar
+COPY --from=build /workspace/build/libs/currency-quiz-backend-all.jar /app/app.jar
 
 ENV PORT=8080 \
     QUESTIONS_FILE=/app/data/questions.json
