@@ -279,6 +279,120 @@ class ServerTest {
     }
 
     @Test
+    fun `wildcard CORS permits arbitrary frontend origins without credentials`() {
+        for (allowedOrigins in listOf("*", "$FRONTEND_ORIGIN,*")) {
+            withApi(allowedOrigins = allowedOrigins) {
+                for (origin in listOf("https://quiz.school.example", "http://localhost:4321", "https://another-frontend.example:8443")) {
+                    val response = client.get("/api/v1/questions") { header(HttpHeaders.Origin, origin) }
+                    assertEquals(HttpStatusCode.OK, response.status)
+                    assertWildcardCors(response)
+                    assertEquals(JsonArray(emptyList()), response.json())
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `wildcard CORS permits JSON and bearer authorization preflights for supported methods`() = withApi(allowedOrigins = "*") {
+        val id = UUID.randomUUID()
+        val requests = listOf(
+            Triple("/api/v1/auth/login", "POST", "content-type"),
+            Triple("/api/v1/questions/$id/answers", "POST", "content-type"),
+            Triple("/api/v1/questions", "POST", "authorization,content-type"),
+            Triple("/api/v1/questions/$id", "PATCH", "authorization,content-type"),
+            Triple("/api/v1/questions/$id", "DELETE", "authorization"),
+        )
+        for ((path, method, requestedHeaders) in requests) {
+            val response = client.options(path) {
+                header(HttpHeaders.Origin, "https://any-frontend.example")
+                header(HttpHeaders.AccessControlRequestMethod, method)
+                header(HttpHeaders.AccessControlRequestHeaders, requestedHeaders)
+            }
+            assertTrue(response.status.isSuccess(), "$method $path")
+            assertWildcardCors(response)
+            val methods = response.headers[HttpHeaders.AccessControlAllowMethods].orEmpty().split(',').map(String::trim)
+            assertContains(methods, method)
+            val headers = response.headers[HttpHeaders.AccessControlAllowHeaders].orEmpty()
+                .split(',').map { it.trim().lowercase() }
+            for (requestedHeader in requestedHeaders.split(',')) assertContains(headers, requestedHeader)
+        }
+    }
+
+    @Test
+    fun `wildcard CORS preserves bearer protection and authenticated question management`() = withApi(allowedOrigins = "*") {
+        val origin = "https://any-admin-frontend.example"
+        val missingId = UUID.randomUUID()
+        val unauthorized = listOf(
+            client.post("/api/v1/questions") {
+                header(HttpHeaders.Origin, origin)
+                jsonBody(questionBody())
+            },
+            client.patch("/api/v1/questions/$missingId") {
+                header(HttpHeaders.Origin, origin)
+                jsonBody("""{"text":"Updated?"}""")
+            },
+            client.delete("/api/v1/questions/$missingId") { header(HttpHeaders.Origin, origin) },
+        )
+        for (response in unauthorized) {
+            assertEquals(HttpStatusCode.Unauthorized, response.status)
+            assertTrue(response.headers[HttpHeaders.WWWAuthenticate]?.startsWith("Bearer") == true)
+            assertWildcardCors(response)
+        }
+
+        val login = client.post("/api/v1/auth/login") {
+            header(HttpHeaders.Origin, origin)
+            jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+        }
+        assertEquals(HttpStatusCode.OK, login.status)
+        assertWildcardCors(login)
+        val token = login.json().jsonObject.getValue("accessToken").jsonPrimitive.content
+        val created = client.post("/api/v1/questions") {
+            header(HttpHeaders.Origin, origin)
+            bearerAuth(token)
+            jsonBody(questionBody())
+        }
+        assertEquals(HttpStatusCode.Created, created.status)
+        assertWildcardCors(created)
+        val id = created.json().jsonObject.getValue("id").jsonPrimitive.content
+
+        val updated = client.patch("/api/v1/questions/$id") {
+            header(HttpHeaders.Origin, origin)
+            bearerAuth(token)
+            jsonBody("""{"text":"Updated from another origin?"}""")
+        }
+        assertEquals(HttpStatusCode.OK, updated.status)
+        assertWildcardCors(updated)
+        assertEquals("Updated from another origin?", updated.json().jsonObject.getValue("text").jsonPrimitive.content)
+        val deleted = client.delete("/api/v1/questions/$id") {
+            header(HttpHeaders.Origin, origin)
+            bearerAuth(token)
+        }
+        assertEquals(HttpStatusCode.NoContent, deleted.status)
+        assertWildcardCors(deleted)
+        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
+    }
+
+    @Test
+    fun `wildcard origins cannot bypass the answer rate limit`() = withApi(allowedOrigins = "*") {
+        val id = client.createQuestion(client.login()).json().jsonObject.getValue("id").jsonPrimitive.content
+        repeat(30) { index ->
+            val response = client.post("/api/v1/questions/$id/answers") {
+                header(HttpHeaders.Origin, "https://frontend-$index.example")
+                jsonBody("""{"answer":"EUR"}""")
+            }
+            assertEquals(HttpStatusCode.OK, response.status)
+            assertWildcardCors(response)
+        }
+        val throttled = client.post("/api/v1/questions/$id/answers") {
+            header(HttpHeaders.Origin, "https://one-more-frontend.example")
+            jsonBody("""{"answer":"EUR"}""")
+        }
+        assertEquals(HttpStatusCode.TooManyRequests, throttled.status)
+        assertNotNull(throttled.headers[HttpHeaders.RetryAfter])
+        assertWildcardCors(throttled)
+    }
+
+    @Test
     fun `created and edited questions survive restart and deletions persist`() {
         val directory = Files.createTempDirectory("currencyquiz-persistence-test-")
         val storage = directory.resolve("questions.json")
@@ -405,10 +519,15 @@ class ServerTest {
 
     private fun assertPublicQuestion(question: JsonObject) = assertEquals(setOf("id", "text", "options"), question.keys)
 
-    private fun withApi(block: suspend ApplicationTestBuilder.() -> Unit) {
+    private fun assertWildcardCors(response: HttpResponse) {
+        assertEquals("*", response.headers[HttpHeaders.AccessControlAllowOrigin])
+        assertNull(response.headers[HttpHeaders.AccessControlAllowCredentials])
+    }
+
+    private fun withApi(allowedOrigins: String = FRONTEND_ORIGIN, block: suspend ApplicationTestBuilder.() -> Unit) {
         val directory = Files.createTempDirectory("currencyquiz-api-test-")
         try {
-            runApi(directory.resolve("questions.json"), block = block)
+            runApi(directory.resolve("questions.json"), allowedOrigins = allowedOrigins, block = block)
         } finally {
             directory.toFile().deleteRecursively()
         }
@@ -417,6 +536,7 @@ class ServerTest {
     private fun runApi(
         storage: Path,
         initializeEmpty: Boolean = true,
+        allowedOrigins: String = FRONTEND_ORIGIN,
         block: suspend ApplicationTestBuilder.() -> Unit,
     ) {
         if (initializeEmpty && !Files.exists(storage)) {
@@ -430,7 +550,7 @@ class ServerTest {
                     "security.adminPassword" to ADMIN_PASSWORD,
                     "security.jwtSecret" to JWT_SECRET,
                     "storage.questionsFile" to storage.toString(),
-                    "cors.allowedOrigins" to FRONTEND_ORIGIN,
+                    "cors.allowedOrigins" to allowedOrigins,
                 )
             }
             application { module() }

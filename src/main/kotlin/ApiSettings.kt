@@ -51,12 +51,18 @@ class ApiSettings(
                 jwtAudience = optional("security.jwtAudience", "currencyquiz-admin"),
                 tokenTtlSeconds = tokenTtl,
                 allowedOrigins = optional("cors.allowedOrigins", "").split(',')
-                    .map(String::trim).filter(String::isNotEmpty).map { it.removeSuffix("/") }.distinct(),
+                    .map(String::trim).filter(String::isNotEmpty)
+                    .map { origin ->
+                        // Validate before normalizing, so malformed wildcards such as "*/" stay invalid.
+                        validateOrigin(origin)
+                        origin.removeSuffix("/")
+                    }.distinct(),
                 questionsFile = optional("storage.questionsFile", "data/questions.json"),
             )
         }
 
         private fun validateOrigin(origin: String) {
+            if (origin == "*") return
             val uri = runCatching { URI(origin) }.getOrNull()
             require(
                 uri != null && uri.scheme?.lowercase() in setOf("http", "https") &&
@@ -65,7 +71,7 @@ class ApiSettings(
                     uri.rawPath.orEmpty() in setOf("", "/") &&
                     (uri.port == -1 || uri.port in 1..65535)
             ) {
-                "cors.allowedOrigins must contain only HTTP(S) origins without credentials, paths, queries, or fragments"
+                "cors.allowedOrigins must contain '*' or HTTP(S) origins without credentials, paths, queries, or fragments"
             }
         }
     }

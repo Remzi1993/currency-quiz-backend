@@ -18,9 +18,14 @@ fun Application.configureHttp(settings: ApiSettings) {
         exposeHeader(HttpHeaders.Location)
         exposeHeader(HttpHeaders.RetryAfter)
         allowNonSimpleContentTypes = true
-        settings.allowedOrigins.forEach { origin ->
-            val uri = URI(origin)
-            allowHost(uri.rawAuthority, schemes = listOf(uri.scheme))
+        allowCredentials = false
+        if ("*" in settings.allowedOrigins) {
+            anyHost()
+        } else {
+            settings.allowedOrigins.forEach { origin ->
+                val uri = URI(origin)
+                allowHost(uri.rawAuthority, schemes = listOf(uri.scheme))
+            }
         }
     }
     routing {

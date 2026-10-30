@@ -55,14 +55,14 @@ openssl rand -base64 48
 
 Open `.env` in your editor and paste the generated value into `JWT_SECRET`.
 
-Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. `CORS_ALLOWED_ORIGINS` can contain your frontend's origin.
+Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. It also sets `CORS_ALLOWED_ORIGINS=*` so developers can call this public API from any browser origin. Replace `*` with explicit frontend origins if you want to restrict browser access.
 
 ### Docker Compose
 
 Start Docker with Compose support, then run this from the project root after initializing `shared/` and saving `.env`. The command works in **PowerShell 7+ and Linux/Bash**:
 
 ```sh
-docker compose up -d --build --wait
+docker compose up --build --wait
 ```
 
 The image build runs the tests and packages the application. Compose starts the API in the background and waits for its HTTP health check at `/` to pass. The published port is bound to `127.0.0.1`. Open `http://localhost:8080`, or use the host port set by `PORT` in `.env`.
@@ -105,10 +105,18 @@ The server requires credentials and a signing secret at startup; there are no de
 | `JWT_ISSUER`            | No       | `currencyquiz-api`                                                                               |
 | `JWT_AUDIENCE`          | No       | `currencyquiz-admin`                                                                             |
 | `JWT_TOKEN_TTL_SECONDS` | No       | `3600`; from 1 to 86400 seconds                                                                  |
-| `CORS_ALLOWED_ORIGINS`  | No       | Empty; comma-separated HTTP(S) origins, such as `http://localhost:5173,https://quiz.example.com` |
+| `CORS_ALLOWED_ORIGINS`  | No       | Empty application default; `*` allows any browser origin, or use comma-separated HTTP(S) origins. `.env.example` sets `*`. |
 | `QUESTIONS_FILE`        | No       | `data/questions.json`, relative to the working directory                                         |
 
 [.env.example](.env.example) lists the supported variables. `.env` is read from the process working directory and supports comments and double-quoted values. Existing OS environment variables and explicit JVM system properties take precedence over values in `.env`. A missing `.env` is allowed when settings come from your IDE or hosting environment; malformed entries cause a configuration error. `.env` is ignored by Git. Do not commit credentials or signing secrets.
+
+### Browser access (CORS)
+
+`CORS_ALLOWED_ORIGINS=*` allows requests from any browser origin, which suits this public developer API. To allow only selected frontends, use a comma-separated list such as `http://localhost:5173,https://quiz.example.com`. When the variable is absent or empty, no cross-origin browser origins are allowed. A list containing `*` and valid explicit origins still allows every origin. Invalid entries are rejected even alongside `*`; partial wildcards such as `*/` and `https://*.example.com` are not supported.
+
+[ApiSettings.kt](src/main/kotlin/ApiSettings.kt) validates the setting, and [Http.kt](src/main/kotlin/Http.kt) maps `*` to Ktor's `anyHost()` or configures the explicit origin list. CORS credentials are disabled (`allowCredentials = false`), so this does not enable cookie-based credentialed requests. Admin operations still require an explicitly supplied bearer JWT, and the existing login and answer-submission rate limits apply.
+
+After changing `.env`, restart a native server. For Docker, rerun the documented `docker compose up -d --build --wait` command so Compose applies the configuration to a recreated service; stopping and starting the old container does not update its environment.
 
 ## Endpoints
 
@@ -241,11 +249,13 @@ Questions are saved to `QUESTIONS_FILE` using atomic file replacement where the 
 
 This repository is intended for one server process accessing the questions file. Use a database and shared rate limiting before running multiple instances. The local JSON repository is separate from routing so storage can be replaced later.
 
-Expose the API over HTTPS in deployment and keep secrets in your hosting environment. CORS permits only the configured browser origins; it does not grant admin access. Rate limits use the connection's client IP; behind a reverse proxy, configure trusted proxy handling before relying on per-player limits. Never trust arbitrary client-supplied forwarding headers.
+Expose the API over HTTPS in deployment and keep secrets in your hosting environment. CORS permits every browser origin when configured with `*`, or only the explicit origins otherwise; it does not grant admin access. Rate limits use the connection's client IP; behind a reverse proxy, configure trusted proxy handling before relying on per-player limits. Never trust arbitrary client-supplied forwarding headers.
 
 ### Render preparation
 
 For a future Render web service, choose Docker and use the repository's root `Dockerfile`. Supply the admin credentials, JWT secret and other runtime settings through Render's dashboard. Render builds the Dockerfile directly; `compose.yaml` is for local use. See [Render's Docker setup](https://render.com/docs/docker).
+
+In the web service's **Environment** settings, set `CORS_ALLOWED_ORIGINS=*`, save the change, and redeploy the service to allow browser clients from any origin. Use explicit origins instead if you want a restricted list. Changing the local `.env` or `.env.example` does not update Render's environment.
 
 Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP health-check path to `/`. See [Render's port requirements](https://render.com/docs/web-services#port-binding) and [health-check settings](https://render.com/docs/health-checks).
 
