@@ -1,0 +1,17 @@
+# Authentication & Authorization Basics
+
+Authentication checks who the admin is; authorization controls which actions they may perform. My quiz allows anonymous play and has one configured admin. This provides partial coverage of this article.
+
+| Topic                   | Current implementation and gaps                                                                                                                                                               | Code evidence                                                                                                                             |
+|-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| Authentication flow     | `POST /api/v1/auth/login` checks admin credentials and returns an access token. Registration and logout endpoints are not implemented.                                                        | [Routing.kt](../../../src/main/kotlin/Routing.kt), [Security.kt](../../../src/main/kotlin/Security.kt)                                    |
+| JWT authentication      | [JWT](https://www.jwt.io/introduction) signatures, issuer, audience, subject, role and expiry are verified. Tests send `Authorization: Bearer <token>`; the frontend has no admin login flow. | [Security.kt](../../../src/main/kotlin/Security.kt), [ServerTest.kt](../../../src/test/kotlin/ServerTest.kt)                              |
+| Password storage        | Configuration contains the plaintext admin password. Unsalted SHA-256 hashes are used for comparisons in memory; bcrypt/Argon2 password storage is missing.                                   | [ApiSettings.kt](../../../src/main/kotlin/ApiSettings.kt), [Security.kt](../../../src/main/kotlin/Security.kt)                            |
+| Roles and authorization | Management routes require `admin` and the configured subject. Players are anonymous; only one role is defined, so the two-role criterion is not met.                                          | [Security.kt](../../../src/main/kotlin/Security.kt), [Routing.kt](../../../src/main/kotlin/Routing.kt)                                    |
+| Security pitfalls       | Access checks run on the server; invalid logins return a generic error. Git ignores `.env`. Stolen tokens can remain valid until expiry; there is no individual token revocation.             | [Routing.kt](../../../src/main/kotlin/Routing.kt), [.gitignore](../../../.gitignore), [Security.kt](../../../src/main/kotlin/Security.kt) |
+
+Salted, slow hashing (such as Argon2id) avoids storing the original password and makes offline guessing more expensive. Unique salts limit reuse of precomputed hashes. See [OWASP's password storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html); this remains an implementation gap here.
+
+[ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers login, bearer protection and rejection of invalid, expired, forged and non-admin tokens. Run `./gradlew test` from the backend root (PowerShell 7+ and Bash).
+
+Related deepening: [Secure coding practices](../deepening/secure-coding-practices.md).

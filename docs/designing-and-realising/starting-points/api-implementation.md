@@ -1,0 +1,16 @@
+# API Implementation
+
+I implemented the quiz REST API with Ktor. The frontend consumes it, and the shared [OpenAPI contract](../../../shared/openapi/currency-quiz.v1.yaml) describes its requests and responses.
+
+| Topic                   | What I implemented                                                                                                                                                                                | Code evidence                                                                                                                                                                     |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| REST resources and CRUD | `GET /api/v1/questions` and `GET /api/v1/questions/{id}` read questions. `POST` creates a question; `PATCH` updates and `DELETE` removes one. Content changes require an admin token.             | [Routing.kt](../../../src/main/kotlin/Routing.kt)                                                                                                                                 |
+| Routing and handlers    | `configureRouting` selects handlers by HTTP method and path. Handlers read typed requests, call the repository and return responses.                                                              | [Routing.kt](../../../src/main/kotlin/Routing.kt), [QuestionRepository.kt](../../../src/main/kotlin/QuestionRepository.kt)                                                        |
+| JSON and status codes   | Content negotiation serializes DTOs as JSON. Reads and updates return `200`; creation returns `201` with a `Location` header; deletion returns `204` with no body.                                | [Serialization.kt](../../../src/main/kotlin/Serialization.kt), [Routing.kt](../../../src/main/kotlin/Routing.kt)                                                                  |
+| Validation and errors   | Invalid fields or malformed JSON return `400`, missing questions return `404`, and unexpected failures return a generic `500`. Error bodies consistently contain `code`, `message` and `details`. | [RequestValidation.kt](../../../src/main/kotlin/RequestValidation.kt), [StatusPages.kt](../../../src/main/kotlin/StatusPages.kt), [Models.kt](../../../src/main/kotlin/Models.kt) |
+
+A valid but wrong quiz answer returns `200` with `{"correct": false}`: the request itself succeeded.
+
+[ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers CRUD, validation and error responses; [ContractTest.kt](../../../src/test/kotlin/ContractTest.kt) checks requests and responses against the shared contract. Run `./gradlew test` from the backend root (PowerShell 7+ and Bash).
+
+Deepening: [API design & contract-first development](../deepening/api-design-and-contract-first-development.md), covering the shared specification, generated models and versioning choices.

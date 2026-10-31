@@ -266,7 +266,7 @@ Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP h
 
 Set `QUESTIONS_FILE=/app/data/questions.json` and mount a persistent disk at `/app/data` to retain admin edits across deploys and restarts. Render's persistent disks require a paid service; without a disk, local file changes are lost. See [Render's persistent-disk documentation](https://render.com/docs/disks).
 
-GitHub checks and an actual Render deployment are later steps.
+The GitHub workflow defines validation, test and build checks. Deployment settings and requiring successful checks before deployment remain separate work.
 
 ## Build and test
 
@@ -281,10 +281,30 @@ Tests provide isolated credentials and temporary storage; no production environm
 
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
 
+## Continuous integration
+
+The [Backend CI workflow](.github/workflows/ci.yml) runs on pushes, pull requests and manual Actions runs. It initializes the pinned `shared/` submodule, uses Temurin Java 25 and Gradle's GitHub cache, then validates OpenAPI → runs tests → builds the runnable JAR. Its Linux runner makes `gradlew` executable because Git currently records it without the executable bit. Tests use isolated credentials and temporary files; no production secrets are needed.
+
+Run the same checks from the backend root in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+git submodule update --init --recursive
+./gradlew openApiValidate
+./gradlew test
+./gradlew shadowJar
+```
+
+The JAR is written to `build/libs/currency-quiz-backend-all.jar`. The workflow uses `--no-daemon` for each Gradle invocation and reuses dependency caches between runs. Actions are pinned to full commit IDs with release-version comments; update the pin and comment together when upgrading. Repository permissions are read-only, and a newer run cancels an older run for the same workflow/ref.
+
+After committing and pushing the workflow, open **Actions → Backend CI** to inspect a run. Manual runs become available from the default branch. To make a successful check mandatory before merging, add the workflow's `checks` status to the branch ruleset after its first run. The workflow packages the app; deployment to Render and deployment gates are configured separately. See [CI/CD Basics](docs/managing-and-collaborating/starting-points/ci-cd-basics.md) for the stage order, logs and remaining evidence gaps.
+
 ## Learning outcomes
 
 - Designing & Realising 
-  - [Secure coding practices](docs/designing-and-realising/secure-coding-practices/OWASP.md)
-  - [API design & contract-first development](docs/designing-and-realising/API/API-design-and-contract-first-development.md)
+  - [Secure coding practices](docs/designing-and-realising/deepening/secure-coding-practices.md)
+  - [API design & contract-first development](docs/designing-and-realising/deepening/api-design-and-contract-first-development.md)
 - Managing & Collaborating
-  - [Containerization](docs/managing-and-collaborating/ci-cd/containerization.md)
+  - [Containerization](docs/managing-and-collaborating/starting-points/containerization.md)
+  - [CI/CD Basics](docs/managing-and-collaborating/starting-points/ci-cd-basics.md)
+  - [CI/CD & Containerization Fundamentals](docs/managing-and-collaborating/starting-points/ci-cd-and-containerization-fundamentals.md)
+  - [CI/CD: Complete Pipeline Design & Implementation](docs/managing-and-collaborating/deepening/ci-cd-complete-pipeline-design-&-implementation.md)

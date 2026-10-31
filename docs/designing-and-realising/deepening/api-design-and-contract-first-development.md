@@ -1,6 +1,8 @@
 # API design & contract-first development
 
-I want the Ktor backend and a future Vue/TypeScript frontend to agree on the API. Copying request and response models into both projects would make them easy to change independently. I chose one shared [OpenAPI contract](../../shared/openapi/currency-quiz.v1.yaml) as the source for both languages.
+I want the Ktor backend and Vue/TypeScript frontend to agree on the API. Copying request and response models into both projects would make them easy to change independently. I chose one shared [OpenAPI contract](../../../shared/openapi/currency-quiz.v1.yaml) as the source for both languages.
+
+Related starting point: [API Implementation](../starting-points/api-implementation.md).
 
 ## Why this approach
 
@@ -20,7 +22,7 @@ The separate `currency-quiz-shared` repository is pinned under the backend's `sh
 
 The backend uses OpenAPI Generator 7.26.0 to generate kotlinx.serialization DTOs under `build/generated/openapi`. Resource processing also packages the canonical contract as `documentation.yaml` for Swagger.
 
-The shared npm package uses openapi-typescript 7.13.0 to generate committed TypeScript declarations. The future frontend can use `import type` from its submodule or a local package dependency. These are [compile-time types](https://openapi-ts.dev/introduction), not a runtime validator or HTTP client. Validation and authorisation remain backend responsibilities.
+The shared npm package uses [OpenAPI Generator and TypeScript](../../../shared/scripts/generate-typescript.mjs) to produce committed, declaration-only models. The frontend imports named types with `import type` from its own shared submodule. These provide compile-time checks; the frontend separately validates incoming JSON. Request validation and authorisation remain backend responsibilities.
 
 JWT verification avoids a server-side login session. The application still has state: question content is stored in a JSON file. Stateless authentication does not make persistence unnecessary.
 
@@ -28,10 +30,10 @@ JWT verification avoids a server-side login session. The application still has s
 
 `/api/v1` identifies the API's major URL version. `info.version` records the contract release using semantic versioning. The OpenAPI format version, such as `3.0.3`, is a separate value.
 
-For a contract change, I update the shared specification, regenerate the types and review the diff. A renamed required field is a breaking change; it needs a migration plan and a new major API version. I commit the shared change first, then deliberately update each consumer's pin. The [shared README](../../shared/README.md) describes the commands and workflow.
+For a contract change, I update the shared specification, regenerate the types and review the diff. A renamed required field is a breaking change; it needs a migration plan and a new major API version. I commit the shared change first, then deliberately update each consumer's pin. The [shared README](../../../shared/README.md) describes the commands and workflow.
 
 ## Evidence and next steps
 
-All 35 backend tests and `shadowJar` have passed, including contract tests for requests, responses, rejected public answer leaks and empty/null-only PATCH bodies. Shared-contract linting, TypeScript generation and the example consumer's type check also passed. The Docker image builds successfully; its running API serves the exact shared specification, seeds 40 public questions and accepts admin login. These checks provide backend evidence; they do not constitute consumer-driven Pact testing.
+The [contract tests](../../../src/test/kotlin/ContractTest.kt) check real requests and responses against the bundled specification, reject public answer leaks and validate empty/null-only PATCH bodies. [Server tests](../../../src/test/kotlin/ServerTest.kt) cover CRUD, authentication, validation and error handling. Run `./gradlew test` from the backend root to rerun these checks (PowerShell 7+ and Bash). These are provider-side checks; they do not constitute consumer-driven Pact testing.
 
-The frontend has not been created. Postman/Bruno CI checks are also pending. The shared repository is local only, so publishing its remote is required before other machines can clone the submodule normally.
+The Vue/TypeScript frontend now consumes the public quiz endpoints. The [shared repository is on GitHub](https://github.com/Remzi1993/currency-quiz-shared), and both applications include it as a submodule. Consumer-driven Pact testing and Postman/Bruno CI checks remain separate work.

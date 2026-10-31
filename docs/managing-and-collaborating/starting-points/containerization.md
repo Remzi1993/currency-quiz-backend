@@ -1,6 +1,6 @@
 # Containerization
 
-I want a repeatable way to build and start the Currency Quiz API without configuring Java on every machine. Containerization is my first step towards a delivery process. GitHub checks and a Render deployment come later.
+I want a repeatable way to build and start the Currency Quiz API without configuring Java on every machine. Containerization is my first step towards a delivery process. GitHub checks are now defined separately; staging and controlled promotion remain next steps.
 
 ## My choices
 
@@ -8,7 +8,7 @@ The [Dockerfile](../../../Dockerfile) uses two stages. A Java 25 JDK stage runs 
 
 The [.dockerignore](../../../.dockerignore) excludes local secrets and generated files from the build context. Credentials are supplied at runtime, so they do not need to be copied into the image.
 
-[Compose](../../../compose.yaml) describes the local service: its port, runtime variables, storage, restart policy and health check. This gives another developer one startup command after creating `.env`:
+[Compose](../../../compose.yaml) describes the local service: its port, runtime variables, storage, restart policy and health check. This gives another developer one startup command after creating `.env` in the project root:
 
 ```sh
 docker compose up -d --build --wait
@@ -28,14 +28,16 @@ On 29 October 2026, the Docker build passed all 31 tests. The first build stoppe
 
 The container checks used a separate Compose project with test credentials:
 
-| Check | Result |
-|-------|--------|
-| Startup and permissions | Healthy HTTP response; application runs as UID `10001`. |
+| Check                   | Result                                                                                      |
+|-------------------------|---------------------------------------------------------------------------------------------|
+| Startup and permissions | Healthy HTTP response; application runs as UID `10001`.                                     |
 | Quiz and authentication | 40 seeded public questions without answers; admin login, creation and answer checking work. |
-| Persistent storage | An added question survives container recreation with the same volume. |
-| Runtime configuration | `PORT=10000` works, including the image health check. |
-| Image contents | No project `.env` or source directory in the runtime container. |
+| Persistent storage      | An added question survives container recreation with the same volume.                       |
+| Runtime configuration   | `PORT=10000` works, including the image health check.                                       |
+| Image contents          | No project `.env` or source directory in the runtime container.                             |
 
 A successful `/` check shows that the HTTP server responds. The separate API and persistence checks provide evidence for authentication and storage. Render deployment still needs its own validation.
 
 For Render, the same Dockerfile can be used with dashboard environment variables and a persistent disk for question data. This remains a deployment plan. Containerization alone does not provide automated releases or prove production readiness.
+
+Deepening: [CI/CD: Complete Pipeline Design & Implementation](../deepening/ci-cd-complete-pipeline-design-&-implementation.md).
