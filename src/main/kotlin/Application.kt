@@ -13,6 +13,8 @@ fun Application.module() {
 
 fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository, browserSessions: BrowserSessions = BrowserSessions(settings)) {
     install(CallLogging) {
+        // The custom format is plain text, so Jansi native console support is unnecessary.
+        disableDefaultColors()
         format { call -> "${call.request.httpMethod.value} ${call.request.path()} -> ${call.response.status()?.value}" }
     }
     configureSerialization()

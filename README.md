@@ -94,6 +94,8 @@ For native runs, the application loads `.env` automatically on each start. You d
 
 The API listens on `http://localhost:8080`. Interactive Swagger documentation is available at `http://localhost:8080/openapi`.
 
+Request logging uses a plain-text format with Ktor's default colors disabled in [Application.kt](src/main/kotlin/Application.kt). This avoids initializing Jansi's native console support and its Java 25 native-access warning in IntelliJ, Gradle and packaged runs. No additional JVM options are needed for this logging configuration.
+
 The server requires credentials and a signing secret at startup; there are no default admin credentials. Keep the same JWT secret between restarts if existing tokens should remain valid. Changing it invalidates previously issued tokens.
 
 | Variable                | Required | Default / constraints                                                                            |
