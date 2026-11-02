@@ -6,6 +6,7 @@ pluginManagement {
 
 plugins {
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
+    id("io.github.ben-manes.versions") version "0.67.0"
 }
 
 dependencyResolutionManagement {
@@ -13,7 +14,7 @@ dependencyResolutionManagement {
         mavenCentral()
     }
     versionCatalogs {
-        create("ktorLibs").from("io.ktor:ktor-version-catalog:3.6.0")
+        create("ktorLibs").from("io.ktor:ktor-version-catalog:3.6.1")
     }
 }
 
