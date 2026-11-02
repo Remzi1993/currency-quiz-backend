@@ -15,8 +15,11 @@ RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
 FROM eclipse-temurin:25-jre-noble AS runtime
 WORKDIR /app
 
+# Skip optional apt-utils preconfiguration; dpkg still configures packages during installation.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends curl \
+    && mv /etc/apt/apt.conf.d/70debconf /tmp/70debconf \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends curl \
+    && mv /tmp/70debconf /etc/apt/apt.conf.d/70debconf \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 quiz \
     && useradd --uid 10001 --gid quiz --no-create-home --shell /usr/sbin/nologin quiz \

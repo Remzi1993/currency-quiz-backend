@@ -30,8 +30,9 @@ submodules are introduced. See [Git's instructions for cloning projects with sub
 The shared repository is published at [currency-quiz-shared](https://github.com/Remzi1993/currency-quiz-shared). 
 Each consumer pins its contract revision through the submodule.
 
-Normal Gradle builds generate Kotlin DTOs with OpenAPI Generator 7.26.0 into `build/generated/openapi`, in package 
-`info.remzi.currencyquiz.contract`. `test` and `check` also validate the specification. 
+Normal Gradle builds generate Kotlin DTOs with OpenAPI Generator into `build/generated/openapi`, in package
+`info.remzi.currencyquiz.contract`. The generator version is pinned in the [version catalog](gradle/libs.versions.toml).
+`test` and `check` also validate the specification.
 Resource processing bundles the same specification as `documentation.yaml` for Swagger; there is no second hand-maintained copy.
 
 The shared npm package, `@currency-quiz/contract`, uses OpenAPI Generator to generate committed declarations at 
@@ -441,6 +442,22 @@ These commands work in **PowerShell 7+ and Linux/Bash**. Generation and OpenAPI 
 ```
 
 Tests provide isolated credentials and temporary storage; no production environment variables are required.
+
+The [build script](build.gradle.kts) registers OpenAPI Generator's `GenerateTask` and `ValidateTask` directly.
+The plugin declaration uses `apply false` to provide those task types without its deprecated `Configuration.setVisible` setup.
+Generation validates the contract first and disables the optional [OpenAPI normalizer](https://openapi-generator.tech/docs/customization/#openapi-normalizer),
+whose inline-array handling otherwise reports a null schema reference. The current contract generates identical Kotlin models without that preprocessing.
+
+[gradle.properties](gradle.properties) sets `org.gradle.warning.mode=fail`, so Gradle deprecations fail local, CI and Docker builds.
+To investigate a future warning with all details, run this command in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+./gradlew clean test shadowJar --warning-mode all
+```
+
+The [Dockerfile](Dockerfile) temporarily skips debconf's optional preconfiguration hook when installing curl, then restores it.
+The slim image has no `apt-utils`; normal package configuration still runs during installation, without adding extra runtime tools.
+The generator's worker-isolation explanation and Gradle's configuration-cache suggestion are informational messages.
 
 The API uses Ktor routing, Content Negotiation with kotlinx.serialization, JWT and cookie authentication, Status Pages, 
 Request Validation, Call Logging, a selective CORS plugin, and Ktor Rate Limit. 

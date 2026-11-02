@@ -1,11 +1,13 @@
 
 import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
+import org.openapitools.generator.gradle.plugin.tasks.ValidateTask
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(ktorLibs.plugins.ktor)
     alias(libs.plugins.kotlin.serialization)
-    alias(libs.plugins.openapi.generator)
+    // Use the task types without the plugin's deprecated Configuration.setVisible setup.
+    alias(libs.plugins.openapi.generator) apply false
 }
 
 group = "info.remzi.currencyquiz"
@@ -24,28 +26,28 @@ check(contractFile.asFile.isFile) {
     "Missing shared API contract. Run git submodule update --init --recursive."
 }
 
-openApiValidate {
-    inputSpec.set(contractFile.asFile.absolutePath)
+tasks.register<ValidateTask>("openApiValidate") {
+    inputSpec.set(contractFile)
 }
 
-openApiGenerate {
+val generateContractModels = tasks.register<GenerateTask>("openApiGenerate") {
     generatorName.set("kotlin")
-    inputSpec.set(contractFile.asFile.absolutePath)
-    configFile.set(layout.projectDirectory.file("shared/generators/kotlin.json").asFile.absolutePath)
-    outputDir.set(layout.buildDirectory.dir("generated/openapi").get().asFile.absolutePath)
+    inputSpec.set(contractFile)
+    configFile.set(layout.projectDirectory.file("shared/generators/kotlin.json"))
+    outputDir.set(layout.buildDirectory.dir("generated/openapi"))
     globalProperties.set(mapOf("models" to "", "modelDocs" to "false", "modelTests" to "false"))
     // UUIDs remain JSON strings at this boundary, as they do in TypeScript.
     typeMappings.set(mapOf("UUID" to "kotlin.String"))
-}
-
-val generateContractModels = tasks.named<GenerateTask>("openApiGenerate") {
+    // Generate directly from the validated contract; avoid the upstream inline-array normalizer bug.
+    openapiNormalizer.set(mapOf("DISABLE_ALL" to "true"))
+    dependsOn("openApiValidate")
     inputs.file("shared/generators/kotlin.json")
     // Removed schemas must not leave stale models in the generated source set.
     doFirst { delete(layout.buildDirectory.dir("generated/openapi")) }
 }
 
 kotlin.sourceSets.main {
-    kotlin.srcDir(generateContractModels.map { "${it.outputDir.get()}/src/main/kotlin" })
+    kotlin.srcDir(generateContractModels.flatMap { it.outputDir.dir("src/main/kotlin") })
 }
 
 tasks.named("compileKotlin") { dependsOn(generateContractModels) }
