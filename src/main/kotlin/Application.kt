@@ -11,15 +11,15 @@ fun Application.module() {
     quizModule(settings, repository)
 }
 
-fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository) {
+fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository, browserSessions: BrowserSessions = BrowserSessions(settings)) {
     install(CallLogging) {
         format { call -> "${call.request.httpMethod.value} ${call.request.path()} -> ${call.response.status()?.value}" }
     }
     configureSerialization()
     configureStatusPages()
     configureRequestValidation()
-    configureSecurity(settings)
+    configureSecurity(settings, browserSessions)
     configureRateLimiting()
     configureHttp(settings)
-    configureRouting(repository, AuthService(settings))
+    configureRouting(repository, AuthService(settings), browserSessions)
 }

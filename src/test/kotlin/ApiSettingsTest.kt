@@ -4,8 +4,56 @@ import io.ktor.server.config.MapApplicationConfig
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 class ApiSettingsTest {
+    @Test
+    fun `security lifetimes cannot exceed five minutes access fifteen idle or thirty overall`() {
+        val defaults = ApiSettings.from(config())
+        assertEquals(300L, defaults.tokenTtlSeconds)
+        assertEquals(900L, defaults.sessionIdleSeconds)
+        assertEquals(1800L, defaults.sessionAbsoluteSeconds)
+        for ((key, value) in listOf(
+            "security.tokenTtlSeconds" to "301", "security.tokenTtlSeconds" to "0",
+            "security.sessionIdleSeconds" to "901", "security.sessionIdleSeconds" to "299",
+            "security.sessionAbsoluteSeconds" to "1801", "security.sessionAbsoluteSeconds" to "899",
+        )) assertFailsWith<IllegalArgumentException> { ApiSettings.from(config().apply { put(key, value) }) }
+    }
+    @Test
+    fun `browser sessions require explicit origins and secure cookies by default`() {
+        val defaults = ApiSettings.from(config())
+        assertEquals(emptyList(), defaults.adminAllowedOrigins)
+        assertTrue(defaults.authCookieSecure)
+        assertEquals("Strict", defaults.authCookieSameSite)
+        val local = ApiSettings.from(config().apply {
+            put("security.adminAllowedOrigins", " http://localhost:5173/, https://quiz.example, http://localhost:5173 ")
+            put("security.authCookieSecure", "false")
+        })
+        assertEquals(listOf("http://localhost:5173", "https://quiz.example"), local.adminAllowedOrigins)
+        assertFalse(local.authCookieSecure)
+        for (origins in listOf("*", "https://quiz.example,*", "https://*.example", "https://quiz.example/path")) {
+            assertFailsWith<IllegalArgumentException> { ApiSettings.from(config().apply { put("security.adminAllowedOrigins", origins) }) }
+        }
+    }
+
+    @Test
+    fun `cookie settings reject ambiguous booleans unsupported SameSite and insecure None`() {
+        for (value in listOf("yes", "1", "TRUE", "")) {
+            assertFailsWith<IllegalStateException> { ApiSettings.from(config().apply { put("security.authCookieSecure", value) }) }
+        }
+        for (sameSite in listOf("lax", "invalid", "")) {
+            assertFailsWith<IllegalArgumentException> { ApiSettings.from(config().apply { put("security.authCookieSameSite", sameSite) }) }
+        }
+        assertFailsWith<IllegalArgumentException> {
+            ApiSettings.from(config().apply {
+                put("security.authCookieSameSite", "None")
+                put("security.authCookieSecure", "false")
+            })
+        }
+        assertEquals("None", ApiSettings.from(config().apply { put("security.authCookieSameSite", "None") }).authCookieSameSite)
+    }
+
     @Test
     fun `an exact wildcard is accepted and repeated entries are normalized`() {
         assertEquals(listOf("*"), ApiSettings.from(config(" * , * ")).allowedOrigins)

@@ -17,6 +17,9 @@ class LocalEnvironmentTest {
             JWT_AUDIENCE=local-audience
             JWT_TOKEN_TTL_SECONDS=1800
             CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
+            ADMIN_CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
+            AUTH_COOKIE_SECURE=false
+            AUTH_COOKIE_SAME_SITE=Lax
             QUESTIONS_FILE="data/local questions.json"
             PORT=9090 # Development port
         """.trimIndent())
@@ -24,7 +27,7 @@ class LocalEnvironmentTest {
 
         loadLocalEnvironment(directory, emptyMap(), properties)
 
-        assertEquals(9, properties.size)
+        assertEquals(12, properties.size)
         assertEquals("local-admin", properties.getProperty("ADMIN_USERNAME"))
         assertEquals("a password with # inside", properties.getProperty("ADMIN_PASSWORD"))
         assertEquals("a-local-signing-secret-with-at-least-32-bytes", properties.getProperty("JWT_SECRET"))
@@ -32,6 +35,9 @@ class LocalEnvironmentTest {
         assertEquals("local-audience", properties.getProperty("JWT_AUDIENCE"))
         assertEquals("1800", properties.getProperty("JWT_TOKEN_TTL_SECONDS"))
         assertEquals("http://localhost:5173,https://quiz.example", properties.getProperty("CORS_ALLOWED_ORIGINS"))
+        assertEquals("http://localhost:5173,https://quiz.example", properties.getProperty("ADMIN_CORS_ALLOWED_ORIGINS"))
+        assertEquals("false", properties.getProperty("AUTH_COOKIE_SECURE"))
+        assertEquals("Lax", properties.getProperty("AUTH_COOKIE_SAME_SITE"))
         assertEquals("data/local questions.json", properties.getProperty("QUESTIONS_FILE"))
         assertEquals("9090", properties.getProperty("PORT"))
     }

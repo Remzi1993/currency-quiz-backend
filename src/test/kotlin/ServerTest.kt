@@ -119,7 +119,7 @@ class ServerTest {
         assertEquals(HttpStatusCode.OK, login.status)
         val body = login.json().jsonObject
         assertEquals("Bearer", body.getValue("tokenType").jsonPrimitive.content)
-        assertEquals(3600L, body.getValue("expiresIn").jsonPrimitive.long)
+        assertEquals(300L, body.getValue("expiresIn").jsonPrimitive.long)
         val jwt = JWT.decode(body.getValue("accessToken").jsonPrimitive.content)
         assertEquals(ADMIN_USERNAME, jwt.subject)
         assertEquals("admin", jwt.getClaim("role").asString())
@@ -594,7 +594,7 @@ class ServerTest {
         role: String = "admin",
         issuer: String = "currencyquiz-api",
         audience: String = "currencyquiz-admin",
-        expiresAt: Instant? = Instant.now().plusSeconds(3600),
+        expiresAt: Instant? = Instant.now().plusSeconds(120),
     ): String {
         val token = JWT.create().withSubject(subject).withClaim("role", role)
             .withIssuer(issuer).withAudience(audience)

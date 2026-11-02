@@ -24,6 +24,49 @@ class ContractTest {
     }
 
     @Test
+    fun `browser login refresh activity and logout responses conform to shared contract`() = withApi {
+        val sessionPath = "/api/v1/auth/session"
+        suspend fun check(response: HttpResponse, path: String, method: Request.Method, status: HttpStatusCode) {
+            assertEquals(status, response.status)
+            val actual = SimpleResponse.Builder.status(response.status.value)
+            response.headers.entries().forEach { (name, values) -> actual.withHeader(name, values) }
+            val body = response.bodyAsText()
+            if (body.isNotEmpty()) actual.withBody(body)
+            val report = validator.validateResponse(path, method, actual.build())
+            assertFalse(report.hasErrors(), report.messages.joinToString { it.message })
+            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+        }
+        val login = client.post(sessionPath) {
+            header(HttpHeaders.Origin, "http://localhost:5173")
+            contentType(ContentType.Application.Json)
+            setBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+        }
+        check(login, sessionPath, Request.Method.POST, HttpStatusCode.OK)
+        val csrf = login.json().jsonObject.getValue("csrfToken").jsonPrimitive.content
+        fun HttpResponse.cookies() = headers.getAll(HttpHeaders.SetCookie).orEmpty().joinToString("; ") { it.substringBefore(';') }
+        val read = client.get(sessionPath) { header(HttpHeaders.Cookie, login.cookies()) }
+        check(read, sessionPath, Request.Method.GET, HttpStatusCode.OK)
+        val refreshed = client.post("$sessionPath/refresh") {
+            header(HttpHeaders.Origin, "http://localhost:5173")
+            header(HttpHeaders.Cookie, login.cookies())
+            header(CSRF_HEADER, csrf)
+        }
+        check(refreshed, "$sessionPath/refresh", Request.Method.POST, HttpStatusCode.OK)
+        val activity = client.post("$sessionPath/activity") {
+            header(HttpHeaders.Origin, "http://localhost:5173")
+            header(HttpHeaders.Cookie, refreshed.cookies())
+            header(CSRF_HEADER, csrf)
+        }
+        check(activity, "$sessionPath/activity", Request.Method.POST, HttpStatusCode.OK)
+        val logout = client.delete(sessionPath) {
+            header(HttpHeaders.Origin, "http://localhost:5173")
+            header(HttpHeaders.Cookie, refreshed.cookies())
+            header(CSRF_HEADER, csrf)
+        }
+        check(logout, sessionPath, Request.Method.DELETE, HttpStatusCode.NoContent)
+    }
+
+    @Test
     fun `real quiz interactions conform to the bundled shared contract`() = withApi {
         client.checkContract(HttpMethod.Get, "/api/v1/questions", HttpStatusCode.OK)
         val token = client.login()
@@ -210,7 +253,7 @@ class ContractTest {
                 environment { config = MapApplicationConfig() }
                 application {
                     quizModule(
-                        ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET),
+                        ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET, adminAllowedOrigins = listOf("http://localhost:5173")),
                         FileQuestionRepository(storage),
                     )
                 }

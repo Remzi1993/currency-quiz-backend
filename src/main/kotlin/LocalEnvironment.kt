@@ -8,8 +8,9 @@ import java.nio.file.Path
 import java.util.Properties
 
 private val applicationEnvironmentKeys = setOf(
-    "ADMIN_USERNAME", "ADMIN_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE",
-    "JWT_TOKEN_TTL_SECONDS", "CORS_ALLOWED_ORIGINS", "QUESTIONS_FILE", "PORT",
+    "QUESTIONS_FILE", "PORT", "ADMIN_USERNAME", "ADMIN_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE",
+    "JWT_TOKEN_TTL_SECONDS", "CORS_ALLOWED_ORIGINS", "ADMIN_CORS_ALLOWED_ORIGINS", "AUTH_COOKIE_SECURE",
+    "AUTH_COOKIE_SAME_SITE", "ADMIN_SESSION_IDLE_SECONDS", "ADMIN_SESSION_ABSOLUTE_SECONDS",
 )
 
 /** Ktor's YAML substitutions read JVM properties as well as OS environment variables. */

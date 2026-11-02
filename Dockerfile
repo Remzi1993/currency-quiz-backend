@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 FROM eclipse-temurin:25-jdk-noble AS build
 WORKDIR /workspace
 

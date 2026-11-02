@@ -14,5 +14,9 @@ fun Application.configureRateLimiting() {
             rateLimiter(limit = 30, refillPeriod = 1.minutes)
             requestKey { it.request.local.remoteHost }
         }
+        register(RateLimitName("session")) {
+            rateLimiter(limit = 30, refillPeriod = 1.minutes)
+            requestKey { it.request.local.remoteHost }
+        }
     }
 }

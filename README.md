@@ -1,6 +1,6 @@
 # Currency quiz API
 
-A Ktor REST API for playing a currency quiz without an account and managing questions with an admin JWT. Questions have a text prompt, answer options, and one correct answer. Public responses never include the correct answer; answers are checked on the server.
+A Ktor REST API for playing a currency quiz without an account and managing questions with an admin bearer JWT or protected browser cookies. Questions have a text prompt, answer options, and one correct answer. Public responses never include the correct answer; answers are checked on the server.
 
 ## Shared API contract
 
@@ -12,11 +12,11 @@ Initialize the pinned submodule after cloning, and update it after pulling a cha
 git submodule update --init --recursive
 ```
 
-The shared repository is currently local only. This workspace has a local URL override pointing to the sibling `currency-quiz-shared` checkout. The relative `.gitmodules` URL, `../currency-quiz-shared.git`, is intended for the future shared remote. Publish that repository before expecting recursive clones to work on another machine.
+The shared repository is published at [currency-quiz-shared](https://github.com/Remzi1993/currency-quiz-shared). Each consumer pins its contract revision through the submodule.
 
 Normal Gradle builds generate Kotlin DTOs with OpenAPI Generator 7.26.0 into `build/generated/openapi`, in package `info.remzi.currencyquiz.contract`. `test` and `check` also validate the specification. Resource processing bundles the same specification as `documentation.yaml` for Swagger; there is no second hand-maintained copy.
 
-The shared npm package, `@currency-quiz/contract`, uses openapi-typescript 7.13.0 to generate committed declarations at `shared/generated/typescript/schema.d.ts`. The future Vue frontend can import those types from its own `shared/` submodule or install the private package locally as a development dependency. No frontend has been created yet. Generated types do not validate incoming HTTP data at runtime.
+The shared npm package, `@currency-quiz/contract`, uses OpenAPI Generator to generate committed declarations at `shared/generated/typescript/schema.d.ts`. The Vue frontend imports named model types from its own `shared/` submodule. Generated types do not validate incoming HTTP data at runtime.
 
 When checking or changing the TypeScript contract, install Node.js/npm and run these commands from the backend root. They work in **PowerShell 7+ and Linux/Bash**:
 
@@ -55,7 +55,7 @@ openssl rand -base64 48
 
 Open `.env` in your editor and paste the generated value into `JWT_SECRET`.
 
-Set `ADMIN_PASSWORD` to a unique password of at least 12 characters and fill in `JWT_SECRET`. The template sets the username to `admin`; change it if desired. It also sets `CORS_ALLOWED_ORIGINS=*` so developers can call this public API from any browser origin. Replace `*` with explicit frontend origins if you want to restrict browser access.
+Set `ADMIN_USERNAME`, a unique `ADMIN_PASSWORD` of at least 12 characters, and `JWT_SECRET`. The template sets `CORS_ALLOWED_ORIGINS=*` for public developer access. Cookie-based administration separately requires exact `ADMIN_CORS_ALLOWED_ORIGINS` entries. For a frontend at `http://localhost:5173`, keep that entry and set `AUTH_COOKIE_SECURE=false` for local HTTP only. Production keeps Secure enabled.
 
 ### Docker Compose
 
@@ -104,7 +104,12 @@ The server requires credentials and a signing secret at startup; there are no de
 | `JWT_SECRET`            | Yes      | At least 32 UTF-8 bytes; use a random secret                                                     |
 | `JWT_ISSUER`            | No       | `currencyquiz-api`                                                                               |
 | `JWT_AUDIENCE`          | No       | `currencyquiz-admin`                                                                             |
-| `JWT_TOKEN_TTL_SECONDS` | No       | `3600`; from 1 to 86400 seconds                                                                  |
+| `JWT_TOKEN_TTL_SECONDS` | No       | `300`; 1–300 seconds for bearer tokens and browser access cookies |
+| `ADMIN_SESSION_IDLE_SECONDS` | No | `900`; at least the access lifetime and at most 900 seconds |
+| `ADMIN_SESSION_ABSOLUTE_SECONDS` | No | `1800`; at least the idle lifetime and at most 1800 seconds |
+| `ADMIN_CORS_ALLOWED_ORIGINS` | No | Empty default; explicit comma-separated frontend origins. `*` is rejected. |
+| `AUTH_COOKIE_SECURE` | No | `true`; set `false` only for local HTTP development |
+| `AUTH_COOKIE_SAME_SITE` | No | `Strict`; supports `Lax` or `None`, with `None` requiring Secure |
 | `CORS_ALLOWED_ORIGINS`  | No       | Empty application default; `*` allows any browser origin, or use comma-separated HTTP(S) origins. `.env.example` sets `*`. |
 | `QUESTIONS_FILE`        | No       | `data/questions.json`, relative to the working directory                                         |
 
@@ -114,7 +119,7 @@ The server requires credentials and a signing secret at startup; there are no de
 
 `CORS_ALLOWED_ORIGINS=*` allows requests from any browser origin, which suits this public developer API. To allow only selected frontends, use a comma-separated list such as `http://localhost:5173,https://quiz.example.com`. When the variable is absent or empty, no cross-origin browser origins are allowed. A list containing `*` and valid explicit origins still allows every origin. Invalid entries are rejected even alongside `*`; partial wildcards such as `*/` and `https://*.example.com` are not supported.
 
-[ApiSettings.kt](src/main/kotlin/ApiSettings.kt) validates the setting, and [Http.kt](src/main/kotlin/Http.kt) maps `*` to Ktor's `anyHost()` or configures the explicit origin list. CORS credentials are disabled (`allowCredentials = false`), so this does not enable cookie-based credentialed requests. Admin operations still require an explicitly supplied bearer JWT, and the existing login and answer-submission rate limits apply.
+[ApiSettings.kt](src/main/kotlin/ApiSettings.kt) validates both origin lists. [Http.kt](src/main/kotlin/Http.kt) sends credentialed CORS only to exact `ADMIN_CORS_ALLOWED_ORIGINS` entries. Other permitted public origins receive no credential permission; a public `*` never enables cookie administration. Browser-session routes reject untrusted origins even when public CORS is open. Every cookie-authenticated write additionally requires the session-bound `X-CSRF-Token` header. CORS does not replace authentication or CSRF checks.
 
 After changing `.env`, restart a native server. For Docker, rerun the documented `docker compose up -d --build --wait` command so Compose applies the configuration to a recreated service; stopping and starting the old container does not update its environment.
 
@@ -128,11 +133,26 @@ All request bodies use `Content-Type: application/json`.
 | `GET`    | `/api/v1/questions/{id}`         | Public            | `200`: one question without its answer                        |
 | `POST`   | `/api/v1/questions/{id}/answers` | Public            | `200`: `{ "correct": true }` or `{ "correct": false }`        |
 | `POST`   | `/api/v1/auth/login`             | Admin credentials | `200`: JWT access token                                       |
-| `POST`   | `/api/v1/questions`              | Admin JWT         | `201`: created question; `Location` identifies its public URL |
-| `PATCH`  | `/api/v1/questions/{id}`         | Admin JWT         | `200`: updated question                                       |
-| `DELETE` | `/api/v1/questions/{id}`         | Admin JWT         | `204`: deleted, without a response body                       |
+| `POST` | `/api/v1/auth/session` | Admin credentials + trusted Origin | `200`: metadata and HttpOnly access/refresh cookies |
+| `GET` | `/api/v1/auth/session` | Access or current refresh cookie | `200`: metadata, without extending expiry |
+| `POST` | `/api/v1/auth/session/refresh` | Refresh cookie + CSRF + trusted Origin | `200`: rotated cookies; deadlines stay fixed |
+| `POST` | `/api/v1/auth/session/activity` | Access cookie + CSRF + trusted Origin | `200`: updates idle deadline after user activity |
+| `DELETE` | `/api/v1/auth/session` | Access or refresh cookie + CSRF + trusted Origin | `204`: revoke family and clear both cookies |
+| `POST`   | `/api/v1/questions`              | JWT or access cookie + CSRF | `201`: created question; `Location` identifies its public URL |
+| `PATCH`  | `/api/v1/questions/{id}`         | JWT or access cookie + CSRF | `200`: updated question |
+| `DELETE` | `/api/v1/questions/{id}`         | JWT or access cookie + CSRF | `204`: deleted, without a response body |
 
 Management responses include `correctAnswer`. Send the token as `Authorization: Bearer <accessToken>` when creating, editing, or deleting a question. Tokens expire after the configured lifetime; log in again to obtain a new one.
+
+### Browser authentication and session policy
+
+The Vue admin interface uses opaque HttpOnly cookies instead of storing JWTs in JavaScript-accessible storage. Login, reads, rotation and activity return only `{ username, expiresIn, accessExpiresIn, absoluteExpiresIn, csrfToken }`; lifetimes are in seconds. Both credentials are host-only, HttpOnly, Secure by default, and `SameSite=Strict`. Access is scoped to `/api/v1`; refresh to `/api/v1/auth/session`.
+
+Access lasts at most **5 minutes**. The server requires a new login after **15 minutes without activity**, or **30 minutes overall**, whichever comes first. Refresh rotates both credentials and rejects reuse by revoking the session family. Neither reads nor refresh reset inactivity; explicit user activity and valid question changes can reset it. No activity can move the absolute deadline. The frontend renews only before user-requested operations and serializes rotation/login/logout across tabs. Failed writes and refreshes are never automatically retried.
+
+Use the frontend's same-origin `/api` proxy to `https://currencyquiz-backend.onrender.com`; leave `VITE_API_BASE_URL` empty. Browser cookies then belong to the frontend host. Render still needs that exact frontend origin in `ADMIN_CORS_ALLOWED_ORIGINS`. Direct cross-site cookies require `SameSite=None; Secure` and may be blocked by browser policies.
+
+The bounded in-memory store holds at most 1,000 sessions and 128 spent refresh digests per family. Logout revokes the family immediately. A restart or Render free-plan spin-down clears browser sessions. Multiple instances require a shared atomic store. Bearer JWTs remain separate and have no individual revocation. The design, tests, limitations and rationale are documented in [Secure coding practices](docs/designing-and-realising/deepening/secure-coding-practices.md).
 
 ### Example flow with PowerShell 7+
 
@@ -146,7 +166,7 @@ $login = Invoke-RestMethod -Method Post -Uri "$baseUrl/auth/login" `
     -ContentType "application/json" `
     -Body (@{ username = $adminUsername; password = $adminPassword } | ConvertTo-Json)
 
-# Login returns { accessToken, tokenType: "Bearer", expiresIn: 3600 }.
+# Login returns { accessToken, tokenType: "Bearer", expiresIn: 300 }.
 $headers = @{ Authorization = "Bearer $($login.accessToken)" }
 $question = Invoke-RestMethod -Method Post -Uri "$baseUrl/questions" `
     -Headers $headers -ContentType "application/json" `
@@ -235,12 +255,13 @@ The `details` array is empty when there are no additional validation reasons. Th
 |--------|---------------------------------------------------------------------------|
 | `400`  | Invalid JSON, request fields, or question ID                              |
 | `401`  | Invalid credentials or missing, expired, or invalid admin token           |
+| `403` | Origin not allowed, or a cookie-authenticated write has invalid/missing CSRF protection |
 | `404`  | Question or route does not exist                                          |
 | `415`  | Unsupported request content type                                          |
 | `429`  | Rate limit exceeded; respect `Retry-After`                                |
 | `500`  | Unexpected server error; internal details are logged and are not returned |
 
-Login allows 5 requests per minute per client IP. Answer submission allows 30 requests per minute per client IP, shared across question IDs. These limits run in memory and reset when the server restarts.
+Browser and bearer login share 5 attempts per minute per client IP. Refresh and activity share a separate 30 requests per minute per client IP. Answer submission allows 30 requests per minute per client IP across question IDs. Limits are process-local and reset on restart.
 
 ## Storage and deployment
 
@@ -262,6 +283,8 @@ For a future Render web service, choose Docker and use the repository's root `Do
 
 In the web service's **Environment** settings, set `CORS_ALLOWED_ORIGINS=*`, save the change, and redeploy the service to allow browser clients from any origin. Use explicit origins instead if you want a restricted list. Changing the local `.env` or `.env.example` does not update Render's environment.
 
+For browser administration also set `ADMIN_CORS_ALLOWED_ORIGINS` to the exact deployed frontend origin, `AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAME_SITE=Strict`, and `JWT_TOKEN_TTL_SECONDS=300`. Keep `ADMIN_SESSION_IDLE_SECONDS=900` and `ADMIN_SESSION_ABSOLUTE_SECONDS=1800`, or shorten them. An older `JWT_TOKEN_TTL_SECONDS=3600` now fails startup validation; update it before deploying this version. These environment changes and a live deployment must be applied on Render separately.
+
 Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP health-check path to `/`. See [Render's port requirements](https://render.com/docs/web-services#port-binding) and [health-check settings](https://render.com/docs/health-checks).
 
 Set `QUESTIONS_FILE=/app/data/questions.json` and mount a persistent disk at `/app/data` to retain admin edits across deploys and restarts. Render's persistent disks require a paid service; without a disk, local file changes are lost. See [Render's persistent-disk documentation](https://render.com/docs/disks).
@@ -279,7 +302,7 @@ These commands work in **PowerShell 7+ and Linux/Bash**. Generation and OpenAPI 
 
 Tests provide isolated credentials and temporary storage; no production environment variables are required.
 
-The API uses Ktor routing, Content Negotiation with kotlinx.serialization, Authentication with JWT, Status Pages, Request Validation, Call Logging, CORS, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
+The API uses Ktor routing, Content Negotiation with kotlinx.serialization, JWT and cookie authentication, Status Pages, Request Validation, Call Logging, a selective CORS plugin, and Ktor Rate Limit. See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [request validation documentation](https://ktor.io/docs/server-request-validation.html).
 
 ## Continuous integration
 

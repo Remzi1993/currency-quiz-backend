@@ -24,7 +24,7 @@ The backend uses OpenAPI Generator 7.26.0 to generate kotlinx.serialization DTOs
 
 The shared npm package uses [OpenAPI Generator and TypeScript](../../../shared/scripts/generate-typescript.mjs) to produce committed, declaration-only models. The frontend imports named types with `import type` from its own shared submodule. These provide compile-time checks; the frontend separately validates incoming JSON. Request validation and authorisation remain backend responsibilities.
 
-JWT verification avoids a server-side login session. The application still has state: question content is stored in a JSON file. Stateless authentication does not make persistence unnecessary.
+Bearer JWT verification does not require a token store. The browser admin flow uses opaque HttpOnly access/refresh cookies and a bounded server-side session registry for inactivity expiry, rotation and revocation. These are separate authentication choices in the same contract. Question content is stored in a JSON file; browser session state is process-local and clears on restart.
 
 ## Versions and updates
 

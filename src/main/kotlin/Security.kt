@@ -6,8 +6,10 @@ import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.auth.HttpAuthHeader
 import io.ktor.server.application.Application
 import io.ktor.server.auth.authentication
+import io.ktor.server.auth.bearer
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.jwt.jwt
 import io.ktor.server.response.header
@@ -21,11 +23,15 @@ class AuthService(private val settings: ApiSettings) {
     private val passwordHash = hash(settings.adminPassword)
     private val algorithm = Algorithm.HMAC256(settings.jwtSecret)
 
-    fun login(username: String, password: String): TokenResponse? {
+    fun authenticates(username: String, password: String): Boolean {
         // Compare both fixed-size hashes even when the username is unknown.
         val usernameMatches = MessageDigest.isEqual(usernameHash, hash(username))
         val passwordMatches = MessageDigest.isEqual(passwordHash, hash(password))
-        if (!usernameMatches || !passwordMatches) return null
+        return usernameMatches && passwordMatches
+    }
+
+    fun login(username: String, password: String): TokenResponse? {
+        if (!authenticates(username, password)) return null
 
         val now = Instant.now()
         val token = JWT.create()
@@ -43,10 +49,10 @@ class AuthService(private val settings: ApiSettings) {
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
 }
 
-fun Application.configureSecurity(settings: ApiSettings) {
+fun Application.configureSecurity(settings: ApiSettings, browserSessions: BrowserSessions) {
     authentication {
         jwt("admin-jwt") {
-            realm = "currencyquiz-admin"
+            realm = "currency-quiz-admin"
             verifier(
                 JWT.require(Algorithm.HMAC256(settings.jwtSecret))
                     .withAudience(settings.jwtAudience)
@@ -57,7 +63,10 @@ fun Application.configureSecurity(settings: ApiSettings) {
                 val payload = credential.payload
                 if (payload.subject == settings.adminUsername &&
                     payload.getClaim("role").asString() == "admin" &&
-                    payload.expiresAt?.after(Date()) == true
+                    payload.expiresAt?.after(Date()) == true &&
+                    payload.issuedAt?.let { issued ->
+                        !issued.after(Date()) && payload.expiresAt.time - issued.time in 1..300_000
+                    } == true
                 ) {
                     JWTPrincipal(payload)
                 } else {
@@ -65,12 +74,21 @@ fun Application.configureSecurity(settings: ApiSettings) {
                 }
             }
             challenge { _, _ ->
-                call.response.header(HttpHeaders.WWWAuthenticate, "Bearer realm=\"currencyquiz-admin\"")
+                call.response.header(HttpHeaders.WWWAuthenticate, "Bearer realm=\"currency-quiz-admin\"")
                 call.respond(
                     HttpStatusCode.Unauthorized,
                     apiError(code = "unauthorized", message = "A valid admin access token is required"),
                 )
             }
+        }
+        bearer("admin-cookie") {
+            realm = "currency-quiz-admin"
+            authHeader { call ->
+                // An explicitly supplied bearer credential never falls back to a browser cookie.
+                if (call.request.headers[HttpHeaders.Authorization] != null) null
+                else call.request.cookies[ADMIN_COOKIE_NAME]?.let { HttpAuthHeader.Single("Bearer", it) }
+            }
+            authenticate { credentials -> browserSessions.find(credentials.token)?.let(::BrowserSessionPrincipal) }
         }
     }
 }
