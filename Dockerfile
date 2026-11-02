@@ -33,4 +33,5 @@ USER quiz:quiz
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
     CMD curl --fail --silent --show-error --max-time 3 "http://127.0.0.1:${PORT}/" || exit 1
 
-ENTRYPOINT ["java", "-jar", "/app/app.jar"]
+# Netty loads native networking libraries on Linux; the bundled JAR uses unnamed modules.
+ENTRYPOINT ["java", "--enable-native-access=ALL-UNNAMED", "-jar", "/app/app.jar"]
