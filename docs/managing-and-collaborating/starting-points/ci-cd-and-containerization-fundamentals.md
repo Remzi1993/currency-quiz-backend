@@ -1,4 +1,8 @@
 # CI/CD & Containerization Fundamentals
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/cicd-and-containerization-fundamentals/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
 I use GitHub Actions and Docker for this backend. CI means Continuous Integration; [CD means delivery or deployment](https://about.gitlab.com/topics/ci-cd/): keeping changes release-ready or releasing them automatically.
 

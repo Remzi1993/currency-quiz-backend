@@ -1,6 +1,12 @@
 # Containerization
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/containerization/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
-I want a repeatable way to build and start the Currency Quiz API without configuring Java on every machine. Containerization is my first step towards a delivery process. GitHub checks are now defined separately; staging and controlled promotion remain next steps.
+I want a repeatable way to build and start the Currency Quiz API without configuring Java on every machine. 
+Containerization is my first step towards a delivery process. GitHub checks are now defined separately; 
+staging and controlled promotion remain next steps.
 
 ## My choices
 

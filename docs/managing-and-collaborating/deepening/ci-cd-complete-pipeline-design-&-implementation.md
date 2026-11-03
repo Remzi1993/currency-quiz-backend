@@ -1,4 +1,8 @@
 # CI/CD: Complete Pipeline Design & Implementation
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/ci-cd-complete-pipeline-design/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
 I want a change to reach production through repeatable checks, a tested container and a controlled release. The backend already has CI checks and containerization. The staging, promotion and rollback stages below are a design, not completed implementation.
 

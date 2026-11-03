@@ -1,4 +1,8 @@
 # Language & Runtime
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/language-and-runtime/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
 My backend uses Kotlin on the JVM. These examples connect the runtime concepts to the API code.
 

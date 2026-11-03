@@ -1,4 +1,8 @@
 # CI/CD Basics
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/ci-cd-basics/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
 I configured GitHub Actions to validate, test and package the backend on pushes, pull requests and manual runs. The first GitHub execution still needs to be recorded after pushing the workflow.
 

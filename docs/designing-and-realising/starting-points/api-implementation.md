@@ -1,6 +1,11 @@
 # API Implementation
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/rest-api-implementation/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
-I implemented the quiz REST API with Ktor. The frontend consumes it, and the shared [OpenAPI contract](../../../shared/openapi/currency-quiz.v1.yaml) describes its requests and responses.
+I implemented the quiz REST API with Ktor. The frontend consumes it, 
+and the shared [OpenAPI contract](../../../shared/openapi/currency-quiz.v1.yaml) describes its requests and responses.
 
 | Topic                   | What I implemented                                                                                                                                                                                | Code evidence                                                                                                                                                                     |
 |-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -11,6 +16,9 @@ I implemented the quiz REST API with Ktor. The frontend consumes it, and the sha
 
 A valid but wrong quiz answer returns `200` with `{"correct": false}`: the request itself succeeded.
 
-[ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers CRUD, validation and error responses; [ContractTest.kt](../../../src/test/kotlin/ContractTest.kt) checks requests and responses against the shared contract. Run `./gradlew test` from the backend root (PowerShell 7+ and Bash).
+[ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers CRUD, validation and error responses; 
+[ContractTest.kt](../../../src/test/kotlin/ContractTest.kt) checks requests and responses against the shared contract. 
+Run `./gradlew test` from the backend root (PowerShell 7+ and Bash).
 
-Deepening: [API design & contract-first development](../deepening/api-design-and-contract-first-development.md), covering the shared specification, generated models and versioning choices.
+Deepening: [API design & contract-first development](../deepening/api-design-and-contract-first-development.md), covering the shared specification, 
+generated models and versioning choices.

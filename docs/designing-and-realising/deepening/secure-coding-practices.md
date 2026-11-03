@@ -1,16 +1,23 @@
-# Secure coding practices
-
-**Project:** Currency quiz API
+# Secure Coding Practices
+- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/secure-coding-practices/
+- Author: Remzi Çavdar
+- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
+  full responsibility for the accuracy, completeness and usefulness of the content.
 
 ## My goal and choices
 
-I use this project to practise securing a Ktor API. Players can answer without an account; only an admin can change content. I want to protect credentials, question data and availability.
+I use this project to practise securing a Ktor API. Players can answer without an account; only an admin can change content. 
+I want to protect credentials, question data and availability.
 
-Separate public and admin routes avoid collecting player profiles. The Vue admin interface uses an opaque session in an HttpOnly cookie. The existing bearer JWT flow remains available to API clients. Browser sessions can be revoked individually; bearer JWTs have no per-token revocation and remain usable until expiry. Rotating the signing key invalidates all bearer tokens, including legitimate ones.
+Separate public and admin routes avoid collecting player profiles. The Vue admin interface uses an opaque session in an HttpOnly cookie. 
+The existing bearer JWT flow remains available to API clients. Browser sessions can be revoked individually; 
+bearer JWTs have no per-token revocation and remain usable until expiry. 
+Rotating the signing key invalidates all bearer tokens, including legitimate ones.
 
 ## Security in my development process
 
-The [OWASP guidance](https://devguide.owasp.org/en/02-foundations/02-secure-development/) places security throughout the development lifecycle. I am using it to make checks more systematic.
+The [OWASP guidance](https://devguide.owasp.org/en/02-foundations/02-secure-development/) places security throughout the development lifecycle. 
+I am using it to make checks more systematic.
 
 For the next changes, my Definition of Done is:
 
@@ -23,13 +30,13 @@ Peer review and dependency scanning are still pending.
 
 ## What the implementation shows
 
-| Concern                 | Current measure                                                                                              | Code evidence                                                                                                                        |
-|-------------------------|--------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| Concern                 | Current measure                                                                                                                             | Code evidence                                                                                                                                                             |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Unauthorised changes    | Mutations require a verified admin JWT or a live browser session. Cookie writes also require a trusted Origin and session-bound CSRF token. | [Security.kt](../../../src/main/kotlin/Security.kt), [BrowserSessions.kt](../../../src/main/kotlin/BrowserSessions.kt), [Routing.kt](../../../src/main/kotlin/Routing.kt) |
-| Invalid input           | Typed JSON, length limits, unique options and validation after merging a PATCH. Unknown fields are rejected. | [RequestValidation.kt](../../../src/main/kotlin/RequestValidation.kt), [Serialization.kt](../../../src/main/kotlin/Serialization.kt) |
-| Secret exposure         | Configuration holds secrets. Git ignores `../../../.env`; dotenv errors omit secret-bearing lines.           | [LocalEnvironment.kt](../../../src/main/kotlin/LocalEnvironment.kt), [.gitignore](../../../.gitignore)                               |
-| Excessive public data   | Public questions omit answers; checking happens on the server.                                               | [Models.kt](../../../src/main/kotlin/Models.kt)                                                                                      |
-| Abuse and error leakage | Per connection IP: 5 logins/minute and 30 answers/minute. Client errors omit internal exception details.     | [RateLimiting.kt](../../../src/main/kotlin/RateLimiting.kt), [StatusPages.kt](../../../src/main/kotlin/StatusPages.kt)               |
+| Invalid input           | Typed JSON, length limits, unique options and validation after merging a PATCH. Unknown fields are rejected.                                | [RequestValidation.kt](../../../src/main/kotlin/RequestValidation.kt), [Serialization.kt](../../../src/main/kotlin/Serialization.kt)                                      |
+| Secret exposure         | Configuration holds secrets. Git ignores `../../../.env`; dotenv errors omit secret-bearing lines.                                          | [LocalEnvironment.kt](../../../src/main/kotlin/LocalEnvironment.kt), [.gitignore](../../../.gitignore)                                                                    |
+| Excessive public data   | Public questions omit answers; checking happens on the server.                                                                              | [Models.kt](../../../src/main/kotlin/Models.kt)                                                                                                                           |
+| Abuse and error leakage | Per connection IP: 5 logins/minute and 30 answers/minute. Client errors omit internal exception details.                                    | [RateLimiting.kt](../../../src/main/kotlin/RateLimiting.kt), [StatusPages.kt](../../../src/main/kotlin/StatusPages.kt)                                                    |
 
 CORS controls browser origins, not admin permission. Knowing a question UUID also grants no permission to edit it.
 
@@ -49,11 +56,11 @@ The browser flow is separate from `POST /api/v1/auth/login`, so existing bearer 
 
 ### Five-minute access, fifteen-minute inactivity, thirty-minute session
 
-| Deadline | Default and maximum | What extends it |
-| --- | --- | --- |
-| Access credential | `JWT_TOKEN_TTL_SECONDS=300` (5 minutes), also applied to bearer JWTs | A successful refresh issues a new access credential, within the session deadlines. |
-| Browser inactivity | `ADMIN_SESSION_IDLE_SECONDS=900` (15 minutes) | A CSRF-protected admin change or explicit user-activity request. |
-| Overall browser session | `ADMIN_SESSION_ABSOLUTE_SECONDS=1800` (30 minutes from login) | Nothing; credentials must be entered again. |
+| Deadline                | Default and maximum                                                  | What extends it                                                                    |
+|-------------------------|----------------------------------------------------------------------|------------------------------------------------------------------------------------|
+| Access credential       | `JWT_TOKEN_TTL_SECONDS=300` (5 minutes), also applied to bearer JWTs | A successful refresh issues a new access credential, within the session deadlines. |
+| Browser inactivity      | `ADMIN_SESSION_IDLE_SECONDS=900` (15 minutes)                        | A CSRF-protected admin change or explicit user-activity request.                   |
+| Overall browser session | `ADMIN_SESSION_ABSOLUTE_SECONDS=1800` (30 minutes from login)        | Nothing; credentials must be entered again.                                        |
 
 The configuration can shorten these limits but cannot increase them. Access cannot exceed idle lifetime, and idle cannot exceed the overall lifetime. Old bearer JWTs with a lifetime over five minutes are rejected as well. A refresh credential is usable only while its family is within both server deadlines. Its cookie can remain until the absolute deadline; cookie presence is not proof of a valid session.
 
@@ -81,14 +88,14 @@ HttpOnly is not complete XSS protection: injected JavaScript could still read th
 
 The boundaries are client-to-API traffic and the API's access to files and secrets. This first [STRIDE](https://learn.microsoft.com/en-us/azure/security/develop/threat-modeling-tool-threats) review covers both.
 
-| Threat                 | Example in this project          | Control or remaining work                                                   |
-|------------------------|----------------------------------|-----------------------------------------------------------------------------|
-| Spoofing               | Forged admin token or session.   | Verify JWT claims or look up an unexpired opaque session. HTTPS is required. |
+| Threat                 | Example in this project                | Control or remaining work                                                                                    |
+|------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| Spoofing               | Forged admin token or session.         | Verify JWT claims or look up an unexpired opaque session. HTTPS is required.                                 |
 | Tampering              | Unauthorised question changes or CSRF. | Protect mutations, check Origin and CSRF for cookies, and validate input. Deployment needs file permissions. |
-| Repudiation            | An admin denies a deletion.      | Request logs exist; an admin audit trail is missing.                        |
-| Information disclosure | Errors expose internal details.  | Generic client errors and dotenv redaction. Review internal exception logs. |
-| Denial of service      | Requests exhaust resources.      | Limits are process-local. Body-size limits and load testing remain.         |
-| Elevation of privilege | Another role gains admin access. | Check the configured subject and admin role.                                |
+| Repudiation            | An admin denies a deletion.            | Request logs exist; an admin audit trail is missing.                                                         |
+| Information disclosure | Errors expose internal details.        | Generic client errors and dotenv redaction. Review internal exception logs.                                  |
+| Denial of service      | Requests exhaust resources.            | Limits are process-local. Body-size limits and load testing remain.                                          |
+| Elevation of privilege | Another role gains admin access.       | Check the configured subject and admin role.                                                                 |
 
 ## Validation and its limits
 
