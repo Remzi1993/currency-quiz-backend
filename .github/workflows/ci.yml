@@ -40,8 +40,19 @@ jobs:
       - name: Validate OpenAPI contract
         run: ./gradlew --no-daemon openApiValidate
 
-      - name: Test
-        run: ./gradlew --no-daemon test
+      - name: Test and verify coverage
+        run: ./gradlew --no-daemon check
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-and-coverage-reports
+          path: |
+            build/reports/tests/test/
+            build/test-results/test/
+            build/reports/jacoco/test/
+          retention-days: 14
 
       - name: Build application JAR
         run: ./gradlew --no-daemon shadowJar

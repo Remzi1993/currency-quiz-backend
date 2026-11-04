@@ -10,7 +10,7 @@ COPY src ./src
 COPY shared/openapi ./shared/openapi
 COPY shared/generators ./shared/generators
 RUN --mount=type=cache,target=/root/.gradle,sharing=locked \
-    ./gradlew --no-daemon test shadowJar
+    ./gradlew --no-daemon check shadowJar
 
 FROM eclipse-temurin:25-jre-noble AS runtime
 WORKDIR /app
