@@ -3,6 +3,7 @@ import org.openapitools.generator.gradle.plugin.tasks.GenerateTask
 import org.openapitools.generator.gradle.plugin.tasks.ValidateTask
 
 plugins {
+    jacoco
     alias(libs.plugins.kotlin.jvm)
     alias(ktorLibs.plugins.ktor)
     alias(libs.plugins.kotlin.serialization)
@@ -51,8 +52,57 @@ kotlin.sourceSets.main {
 }
 
 tasks.named("compileKotlin") { dependsOn(generateContractModels) }
-tasks.named("test") { dependsOn("openApiValidate") }
-tasks.named("check") { dependsOn("openApiValidate") }
+
+jacoco {
+    toolVersion = libs.versions.jacoco.get()
+}
+
+tasks.withType<Test>().configureEach {
+    useJUnitPlatform {
+        includeEngines("kotest")
+    }
+}
+
+tasks.test {
+    dependsOn("openApiValidate")
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+// Generated contract DTOs are checked by contract tests, not the application coverage gate.
+val applicationClasses = sourceSets.main.get().output.classesDirs.asFileTree.matching {
+    exclude("info/remzi/currencyquiz/contract/**")
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    classDirectories.setFrom(applicationClasses)
+    reports {
+        html.required.set(true)
+        xml.required.set(true)
+        csv.required.set(false)
+    }
+}
+
+tasks.jacocoTestCoverageVerification {
+    dependsOn(tasks.test)
+    classDirectories.setFrom(applicationClasses)
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                minimum = "0.90".toBigDecimal()
+            }
+            limit {
+                counter = "BRANCH"
+                minimum = "0.80".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn("openApiValidate", tasks.jacocoTestCoverageVerification)
+}
 
 tasks.processResources {
     from(contractFile) { rename { "documentation.yaml" } }
@@ -74,7 +124,11 @@ dependencies {
     implementation(ktorLibs.server.swagger)
     implementation(libs.logback.classic)
 
-    testImplementation(kotlin("test"))
+    testImplementation(platform(libs.junit.bom))
+    testImplementation(libs.kotest.runner)
+    testImplementation(libs.kotest.assertions)
+    testImplementation(libs.mockk)
+    testRuntimeOnly(libs.junit.platform.launcher)
     testImplementation(ktorLibs.server.testHost)
     testImplementation(libs.openapi.validator)
 }

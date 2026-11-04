@@ -1,9 +1,16 @@
 package info.remzi.currencyquiz
 
-import info.remzi.currencyquiz.contract.*
-
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import info.remzi.currencyquiz.contract.*
+import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.assertions.withClue
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.collections.shouldContain
+import io.kotest.matchers.nulls.shouldBeNull
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldContain
 import io.ktor.client.HttpClient
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -11,517 +18,533 @@ import io.ktor.http.*
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
-import kotlinx.serialization.json.*
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
 import java.util.Date
 import java.util.UUID
-import kotlin.test.*
+import kotlinx.serialization.json.*
 
-class ServerTest {
-    @Test
-    fun `admin can manage questions while players can play without an account`() = withApi {
-        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
-        val token = client.login()
-        val created = client.createQuestion(token)
-        assertEquals(HttpStatusCode.Created, created.status)
-        val question = created.json().jsonObject
-        val id = question.getValue("id").jsonPrimitive.content
-        assertEquals(id, UUID.fromString(id).toString())
-        assertEquals("/api/v1/questions/$id", created.headers[HttpHeaders.Location])
-        assertEquals("JPY", question.getValue("correctAnswer").jsonPrimitive.content)
+class ServerTest : FunSpec() {
+    init {
+        test("admin can manage questions while players can play without an account") {
+            withApi {
+                client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
+                val token = client.login()
+                val created = client.createQuestion(token)
+                created.status shouldBe HttpStatusCode.Created
+                val question = created.json().jsonObject
+                val id = question.getValue("id").jsonPrimitive.content
+                UUID.fromString(id).toString() shouldBe id
+                created.headers[HttpHeaders.Location] shouldBe "/api/v1/questions/$id"
+                question.getValue("correctAnswer").jsonPrimitive.content shouldBe "JPY"
 
-        val publicQuestion = client.get("/api/v1/questions/$id")
-        assertEquals(HttpStatusCode.OK, publicQuestion.status)
-        assertPublicQuestion(publicQuestion.json().jsonObject)
-        val listing = client.get("/api/v1/questions").json().jsonArray
-        assertEquals(1, listing.size)
-        assertPublicQuestion(listing.single().jsonObject)
-
-        for ((answer, correct) in listOf("  jpy  " to true, "EUR" to false)) {
-            val result = client.post("/api/v1/questions/$id/answers") {
-                jsonBody(buildJsonObject { put("answer", answer) }.toString())
-            }
-            assertEquals(HttpStatusCode.OK, result.status)
-            assertEquals(buildJsonObject { put("correct", correct) }, result.json())
-        }
-        val patched = client.patch("/api/v1/questions/$id") {
-            bearerAuth(token)
-            jsonBody("""{"text":"Which currency does Japan use?"}""")
-        }
-        assertEquals(HttpStatusCode.OK, patched.status)
-        assertEquals("Which currency does Japan use?", patched.json().jsonObject.getValue("text").jsonPrimitive.content)
-        assertEquals(question.getValue("options"), patched.json().jsonObject.getValue("options"))
-        assertEquals(question.getValue("correctAnswer"), patched.json().jsonObject.getValue("correctAnswer"))
-        val deleted = client.delete("/api/v1/questions/$id") { bearerAuth(token) }
-        assertEquals(HttpStatusCode.NoContent, deleted.status)
-        assertEquals("", deleted.bodyAsText())
-        assertEquals(HttpStatusCode.NotFound, client.get("/api/v1/questions/$id").status)
-        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
-    }
-
-    @Test
-    fun `first application startup serves the bundled quiz publicly without revealing answers`() {
-        val directory = Files.createTempDirectory("currencyquiz-seeded-api-test-")
-        val storage = directory.resolve("questions.json")
-        val resource = assertNotNull(javaClass.getResourceAsStream("/questions-seed.json"))
-        val seed = resource.bufferedReader().use { Json.decodeFromString<List<Question>>(it.readText()) }
-        try {
-            assertFalse(Files.exists(storage))
-            runApi(storage, initializeEmpty = false) {
-                val response = client.get("/api/v1/questions")
-                assertEquals(HttpStatusCode.OK, response.status)
-                val questions = response.json().jsonArray
-                assertEquals(40, questions.size)
-                assertEquals(seed.map { it.id }, questions.map { it.jsonObject.getValue("id").jsonPrimitive.content })
-                questions.forEach { assertPublicQuestion(it.jsonObject) }
-                val first = seed.first()
-                val publicQuestion = client.get("/api/v1/questions/${first.id}")
-                assertEquals(HttpStatusCode.OK, publicQuestion.status)
+                val publicQuestion = client.get("/api/v1/questions/$id")
+                publicQuestion.status shouldBe HttpStatusCode.OK
                 assertPublicQuestion(publicQuestion.json().jsonObject)
-                assertEquals(first.text, publicQuestion.json().jsonObject.getValue("text").jsonPrimitive.content)
-                val incorrect = first.options.first { it != first.correctAnswer }
-                for ((answer, correct) in listOf(first.correctAnswer to true, incorrect to false)) {
-                    val result = client.post("/api/v1/questions/${first.id}/answers") {
+                val listing = client.get("/api/v1/questions").json().jsonArray
+                listing.size shouldBe 1
+                assertPublicQuestion(listing.single().jsonObject)
+
+                for ((answer, correct) in listOf("  jpy  " to true, "EUR" to false)) {
+                    val result = client.post("/api/v1/questions/$id/answers") {
                         jsonBody(buildJsonObject { put("answer", answer) }.toString())
                     }
-                    assertEquals(HttpStatusCode.OK, result.status)
-                    assertEquals(buildJsonObject { put("correct", correct) }, result.json())
+                    result.status shouldBe HttpStatusCode.OK
+                    result.json() shouldBe buildJsonObject { put("correct", correct) }
                 }
-            }
-            assertEquals(seed, Json.decodeFromString<List<Question>>(Files.readString(storage)))
-        } finally {
-            directory.toFile().deleteRecursively()
-        }
-    }
-
-    @Test
-    fun `every content mutation requires a bearer token`() = withApi {
-        val id = UUID.randomUUID()
-        val responses = listOf(
-            client.createQuestion(),
-            client.patch("/api/v1/questions/$id") { jsonBody("""{"text":"Updated?"}""") },
-            client.delete("/api/v1/questions/$id"),
-        )
-        for (response in responses) {
-            assertEquals(HttpStatusCode.Unauthorized, response.status)
-            assertTrue(response.headers[HttpHeaders.WWWAuthenticate]?.startsWith("Bearer") == true)
-            assertEquals("unauthorized", response.json().jsonObject.getValue("code").jsonPrimitive.content)
-        }
-    }
-
-    @Test
-    fun `login returns an expiring admin token and rejects invalid credentials`() = withApi {
-        val login = client.post("/api/v1/auth/login") {
-            jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
-        }
-        assertEquals(HttpStatusCode.OK, login.status)
-        val body = login.json().jsonObject
-        assertEquals("Bearer", body.getValue("tokenType").jsonPrimitive.content)
-        assertEquals(300L, body.getValue("expiresIn").jsonPrimitive.long)
-        val jwt = JWT.decode(body.getValue("accessToken").jsonPrimitive.content)
-        assertEquals(ADMIN_USERNAME, jwt.subject)
-        assertEquals("admin", jwt.getClaim("role").asString())
-        assertNotNull(jwt.expiresAt)
-        assertTrue(jwt.expiresAt.after(Date()))
-        assertFalse(body.containsKey("password"))
-        val badPassword = client.post("/api/v1/auth/login") {
-            jsonBody("""{"username":"$ADMIN_USERNAME","password":"wrong-password"}""")
-        }
-        val badUsername = client.post("/api/v1/auth/login") {
-            jsonBody("""{"username":"unknown","password":"$ADMIN_PASSWORD"}""")
-        }
-        assertEquals(HttpStatusCode.Unauthorized, badPassword.status)
-        assertEquals(HttpStatusCode.Unauthorized, badUsername.status)
-        assertEquals(badPassword.json(), badUsername.json())
-        assertFalse(badPassword.bodyAsText().contains(ADMIN_PASSWORD))
-    }
-
-    @Test
-    fun `expired forged and non-admin tokens cannot mutate content`() = withApi {
-        val invalidTokens = listOf(
-            "not-a-jwt",
-            signedToken(secret = "a-different-signing-secret-at-least-32-bytes"),
-            signedToken(expiresAt = Instant.now().minusSeconds(60)),
-            signedToken(role = "player"),
-            signedToken(subject = "another-admin"),
-            signedToken(issuer = "another-issuer"),
-            signedToken(audience = "another-audience"),
-            signedToken(expiresAt = null),
-        )
-        for (token in invalidTokens) assertEquals(HttpStatusCode.Unauthorized, client.createQuestion(token).status)
-        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
-    }
-
-    @Test
-    fun `invalid questions return client errors without creating content`() = withApi {
-        val token = client.login()
-        val bodies = listOf(
-            """{"text":" ","options":["JPY","EUR"],"correctAnswer":"JPY"}""",
-            """{"text":"Currency?","options":["JPY"],"correctAnswer":"JPY"}""",
-            """{"text":"Currency?","options":["JPY"," jpy "],"correctAnswer":"JPY"}""",
-            """{"text":"Currency?","options":["JPY"," "],"correctAnswer":"JPY"}""",
-            """{"text":"Currency?","options":["JPY","EUR"],"correctAnswer":"USD"}""",
-            """{"text":"Currency?","options":["JPY","EUR"],"correctAnswer":" "}""",
-            questionBody(text = "x".repeat(501)),
-            questionBody(options = (1..11).map { "Option $it" }, correctAnswer = "Option 1"),
-            questionBody(options = listOf("JPY", "x".repeat(201))),
-        )
-        for (body in bodies) {
-            val response = client.post("/api/v1/questions") { bearerAuth(token); jsonBody(body) }
-            assertEquals(HttpStatusCode.BadRequest, response.status, body)
-            assertTrue(response.json().jsonObject.getValue("message").jsonPrimitive.content.isNotBlank())
-        }
-        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
-    }
-
-    @Test
-    fun `malformed and incomplete JSON returns a safe client error`() = withApi {
-        val token = client.login()
-        for (body in listOf("{", "{}", "null", "[]", """{"text":42,"options":[],"correctAnswer":"JPY"}""")) {
-            val response = client.post("/api/v1/questions") { bearerAuth(token); jsonBody(body) }
-            assertEquals(HttpStatusCode.BadRequest, response.status, body)
-            assertTrue(response.json().jsonObject.getValue("code").jsonPrimitive.content.isNotBlank())
-            assertFalse(response.bodyAsText().contains("Exception"))
-        }
-    }
-
-    @Test
-    fun `patch validates the resulting question and preserves content when rejected`() = withApi {
-        val token = client.login()
-        val original = client.createQuestion(token).json().jsonObject
-        val id = original.getValue("id").jsonPrimitive.content
-        for (patch in listOf("{}", """{"text":" "}""", """{"options":["EUR","USD"]}""", """{"correctAnswer":"USD"}""")) {
-            val response = client.patch("/api/v1/questions/$id") { bearerAuth(token); jsonBody(patch) }
-            assertEquals(HttpStatusCode.BadRequest, response.status, patch)
-            val unchanged = client.get("/api/v1/questions/$id").json().jsonObject
-            assertEquals(original.getValue("text"), unchanged.getValue("text"))
-            assertEquals(original.getValue("options"), unchanged.getValue("options"))
-        }
-        val updated = client.patch("/api/v1/questions/$id") {
-            bearerAuth(token)
-            jsonBody("""{"options":["EUR","USD"],"correctAnswer":"USD"}""")
-        }
-        assertEquals(HttpStatusCode.OK, updated.status)
-        for ((answer, correct) in listOf("JPY" to false, "USD" to true)) {
-            val result = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"$answer"}""") }
-            assertEquals(correct, result.json().jsonObject.getValue("correct").jsonPrimitive.boolean)
-        }
-    }
-
-    @Test
-    fun `blank missing and oversized answers are invalid`() = withApi {
-        val id = client.createQuestion(client.login()).json().jsonObject.getValue("id").jsonPrimitive.content
-        for (body in listOf("{}", """{"answer":"  "}""", buildJsonObject { put("answer", "x".repeat(201)) }.toString())) {
-            assertEquals(HttpStatusCode.BadRequest, client.post("/api/v1/questions/$id/answers") { jsonBody(body) }.status)
-        }
-    }
-
-    @Test
-    fun `malformed IDs and nonexistent questions produce distinct errors`() = withApi {
-        val token = client.login()
-        for ((id, status) in listOf("not-a-uuid" to HttpStatusCode.BadRequest, UUID.randomUUID().toString() to HttpStatusCode.NotFound)) {
-            assertEquals(status, client.get("/api/v1/questions/$id").status)
-            assertEquals(status, client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"JPY"}""") }.status)
-            assertEquals(status, client.patch("/api/v1/questions/$id") { bearerAuth(token); jsonBody("""{"text":"New question?"}""") }.status)
-            assertEquals(status, client.delete("/api/v1/questions/$id") { bearerAuth(token) }.status)
-        }
-        val unknownRoute = client.get("/api/v1/missing")
-        assertEquals(HttpStatusCode.NotFound, unknownRoute.status)
-        assertTrue(unknownRoute.json().jsonObject.containsKey("message"))
-    }
-
-    @Test
-    fun `login rate limit returns Retry-After without blocking public reads`() = withApi {
-        repeat(5) {
-            assertEquals(HttpStatusCode.Unauthorized, client.post("/api/v1/auth/login") {
-                jsonBody("""{"username":"$ADMIN_USERNAME","password":"incorrect"}""")
-            }.status)
-        }
-        val throttled = client.post("/api/v1/auth/login") {
-            jsonBody("""{"username":"$ADMIN_USERNAME","password":"incorrect"}""")
-        }
-        assertEquals(HttpStatusCode.TooManyRequests, throttled.status)
-        assertNotNull(throttled.headers[HttpHeaders.RetryAfter])
-        assertTrue(throttled.json().jsonObject.containsKey("message"))
-        assertEquals(HttpStatusCode.OK, client.get("/api/v1/questions").status)
-    }
-
-    @Test
-    fun `answer submissions have a separate rate limit`() = withApi {
-        val token = client.login()
-        val id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
-        repeat(30) {
-            assertEquals(HttpStatusCode.OK, client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"EUR"}""") }.status)
-        }
-        val throttled = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"EUR"}""") }
-        assertEquals(HttpStatusCode.TooManyRequests, throttled.status)
-        assertNotNull(throttled.headers[HttpHeaders.RetryAfter])
-        assertEquals(HttpStatusCode.OK, client.get("/api/v1/questions").status)
-        assertEquals(HttpStatusCode.Created, client.createQuestion(token).status)
-    }
-
-    @Test
-    fun `CORS permits configured frontend JSON requests and rejects other origins`() = withApi {
-        val preflight = client.options("/api/v1/questions") {
-            header(HttpHeaders.Origin, FRONTEND_ORIGIN)
-            header(HttpHeaders.AccessControlRequestMethod, "PATCH")
-            header(HttpHeaders.AccessControlRequestHeaders, "authorization,content-type")
-        }
-        assertTrue(preflight.status.isSuccess())
-        assertEquals(FRONTEND_ORIGIN, preflight.headers[HttpHeaders.AccessControlAllowOrigin])
-        assertTrue(preflight.headers[HttpHeaders.AccessControlAllowMethods]?.contains("PATCH") == true)
-        val publicRead = client.get("/api/v1/questions") { header(HttpHeaders.Origin, FRONTEND_ORIGIN) }
-        assertEquals(FRONTEND_ORIGIN, publicRead.headers[HttpHeaders.AccessControlAllowOrigin])
-        val otherOrigin = client.get("/api/v1/questions") { header(HttpHeaders.Origin, "https://untrusted.example") }
-        assertNull(otherOrigin.headers[HttpHeaders.AccessControlAllowOrigin])
-    }
-
-    @Test
-    fun `wildcard CORS permits arbitrary frontend origins without credentials`() {
-        for (allowedOrigins in listOf("*", "$FRONTEND_ORIGIN,*")) {
-            withApi(allowedOrigins = allowedOrigins) {
-                for (origin in listOf("https://quiz.school.example", "http://localhost:4321", "https://another-frontend.example:8443")) {
-                    val response = client.get("/api/v1/questions") { header(HttpHeaders.Origin, origin) }
-                    assertEquals(HttpStatusCode.OK, response.status)
-                    assertWildcardCors(response)
-                    assertEquals(JsonArray(emptyList()), response.json())
-                }
-            }
-        }
-    }
-
-    @Test
-    fun `wildcard CORS permits JSON and bearer authorization preflights for supported methods`() = withApi(allowedOrigins = "*") {
-        val id = UUID.randomUUID()
-        val requests = listOf(
-            Triple("/api/v1/auth/login", "POST", "content-type"),
-            Triple("/api/v1/questions/$id/answers", "POST", "content-type"),
-            Triple("/api/v1/questions", "POST", "authorization,content-type"),
-            Triple("/api/v1/questions/$id", "PATCH", "authorization,content-type"),
-            Triple("/api/v1/questions/$id", "DELETE", "authorization"),
-        )
-        for ((path, method, requestedHeaders) in requests) {
-            val response = client.options(path) {
-                header(HttpHeaders.Origin, "https://any-frontend.example")
-                header(HttpHeaders.AccessControlRequestMethod, method)
-                header(HttpHeaders.AccessControlRequestHeaders, requestedHeaders)
-            }
-            assertTrue(response.status.isSuccess(), "$method $path")
-            assertWildcardCors(response)
-            val methods = response.headers[HttpHeaders.AccessControlAllowMethods].orEmpty().split(',').map(String::trim)
-            assertContains(methods, method)
-            val headers = response.headers[HttpHeaders.AccessControlAllowHeaders].orEmpty()
-                .split(',').map { it.trim().lowercase() }
-            for (requestedHeader in requestedHeaders.split(',')) assertContains(headers, requestedHeader)
-        }
-    }
-
-    @Test
-    fun `wildcard CORS preserves bearer protection and authenticated question management`() = withApi(allowedOrigins = "*") {
-        val origin = "https://any-admin-frontend.example"
-        val missingId = UUID.randomUUID()
-        val unauthorized = listOf(
-            client.post("/api/v1/questions") {
-                header(HttpHeaders.Origin, origin)
-                jsonBody(questionBody())
-            },
-            client.patch("/api/v1/questions/$missingId") {
-                header(HttpHeaders.Origin, origin)
-                jsonBody("""{"text":"Updated?"}""")
-            },
-            client.delete("/api/v1/questions/$missingId") { header(HttpHeaders.Origin, origin) },
-        )
-        for (response in unauthorized) {
-            assertEquals(HttpStatusCode.Unauthorized, response.status)
-            assertTrue(response.headers[HttpHeaders.WWWAuthenticate]?.startsWith("Bearer") == true)
-            assertWildcardCors(response)
-        }
-
-        val login = client.post("/api/v1/auth/login") {
-            header(HttpHeaders.Origin, origin)
-            jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
-        }
-        assertEquals(HttpStatusCode.OK, login.status)
-        assertWildcardCors(login)
-        val token = login.json().jsonObject.getValue("accessToken").jsonPrimitive.content
-        val created = client.post("/api/v1/questions") {
-            header(HttpHeaders.Origin, origin)
-            bearerAuth(token)
-            jsonBody(questionBody())
-        }
-        assertEquals(HttpStatusCode.Created, created.status)
-        assertWildcardCors(created)
-        val id = created.json().jsonObject.getValue("id").jsonPrimitive.content
-
-        val updated = client.patch("/api/v1/questions/$id") {
-            header(HttpHeaders.Origin, origin)
-            bearerAuth(token)
-            jsonBody("""{"text":"Updated from another origin?"}""")
-        }
-        assertEquals(HttpStatusCode.OK, updated.status)
-        assertWildcardCors(updated)
-        assertEquals("Updated from another origin?", updated.json().jsonObject.getValue("text").jsonPrimitive.content)
-        val deleted = client.delete("/api/v1/questions/$id") {
-            header(HttpHeaders.Origin, origin)
-            bearerAuth(token)
-        }
-        assertEquals(HttpStatusCode.NoContent, deleted.status)
-        assertWildcardCors(deleted)
-        assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json())
-    }
-
-    @Test
-    fun `wildcard origins cannot bypass the answer rate limit`() = withApi(allowedOrigins = "*") {
-        val id = client.createQuestion(client.login()).json().jsonObject.getValue("id").jsonPrimitive.content
-        repeat(30) { index ->
-            val response = client.post("/api/v1/questions/$id/answers") {
-                header(HttpHeaders.Origin, "https://frontend-$index.example")
-                jsonBody("""{"answer":"EUR"}""")
-            }
-            assertEquals(HttpStatusCode.OK, response.status)
-            assertWildcardCors(response)
-        }
-        val throttled = client.post("/api/v1/questions/$id/answers") {
-            header(HttpHeaders.Origin, "https://one-more-frontend.example")
-            jsonBody("""{"answer":"EUR"}""")
-        }
-        assertEquals(HttpStatusCode.TooManyRequests, throttled.status)
-        assertNotNull(throttled.headers[HttpHeaders.RetryAfter])
-        assertWildcardCors(throttled)
-    }
-
-    @Test
-    fun `created and edited questions survive restart and deletions persist`() {
-        val directory = Files.createTempDirectory("currencyquiz-persistence-test-")
-        val storage = directory.resolve("questions.json")
-        var id = ""
-        try {
-            runApi(storage) {
-                val token = client.login()
-                id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
-                assertEquals(HttpStatusCode.OK, client.patch("/api/v1/questions/$id") {
+                val patched = client.patch("/api/v1/questions/$id") {
                     bearerAuth(token)
-                    jsonBody("""{"text":"Persisted question?"}""")
-                }.status)
+                    jsonBody("""{"text":"Which currency does Japan use?"}""")
+                }
+                patched.status shouldBe HttpStatusCode.OK
+                patched.json().jsonObject.getValue("text").jsonPrimitive.content shouldBe "Which currency does Japan use?"
+                patched.json().jsonObject.getValue("options") shouldBe question.getValue("options")
+                patched.json().jsonObject.getValue("correctAnswer") shouldBe question.getValue("correctAnswer")
+                val deleted = client.delete("/api/v1/questions/$id") { bearerAuth(token) }
+                deleted.status shouldBe HttpStatusCode.NoContent
+                deleted.bodyAsText() shouldBe ""
+                client.get("/api/v1/questions/$id").status shouldBe HttpStatusCode.NotFound
+                client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
             }
-            assertTrue(Files.exists(storage))
-            runApi(storage) {
-                val restored = client.get("/api/v1/questions/$id")
-                assertEquals(HttpStatusCode.OK, restored.status)
-                assertEquals("Persisted question?", restored.json().jsonObject.getValue("text").jsonPrimitive.content)
-                val answer = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"JPY"}""") }
-                assertTrue(answer.json().jsonObject.getValue("correct").jsonPrimitive.boolean)
+        }
+
+        test("first application startup serves the bundled quiz publicly without revealing answers") {
+            val directory = Files.createTempDirectory("currencyquiz-seeded-api-test-")
+            val storage = directory.resolve("questions.json")
+            val resource = javaClass.getResourceAsStream("/questions-seed.json").shouldNotBeNull()
+            val seed = resource.bufferedReader().use { Json.decodeFromString<List<Question>>(it.readText()) }
+            try {
+                Files.exists(storage) shouldBe false
+                runApi(storage, initializeEmpty = false) {
+                    val response = client.get("/api/v1/questions")
+                    response.status shouldBe HttpStatusCode.OK
+                    val questions = response.json().jsonArray
+                    questions.size shouldBe 40
+                    questions.map { it.jsonObject.getValue("id").jsonPrimitive.content } shouldBe seed.map { it.id }
+                    questions.forEach { assertPublicQuestion(it.jsonObject) }
+                    val first = seed.first()
+                    val publicQuestion = client.get("/api/v1/questions/${first.id}")
+                    publicQuestion.status shouldBe HttpStatusCode.OK
+                    assertPublicQuestion(publicQuestion.json().jsonObject)
+                    publicQuestion.json().jsonObject.getValue("text").jsonPrimitive.content shouldBe first.text
+                    val incorrect = first.options.first { it != first.correctAnswer }
+                    for ((answer, correct) in listOf(first.correctAnswer to true, incorrect to false)) {
+                        val result = client.post("/api/v1/questions/${first.id}/answers") {
+                            jsonBody(buildJsonObject { put("answer", answer) }.toString())
+                        }
+                        result.status shouldBe HttpStatusCode.OK
+                        result.json() shouldBe buildJsonObject { put("correct", correct) }
+                    }
+                }
+                (Json.decodeFromString<List<Question>>(Files.readString(storage))) shouldBe seed
+            } finally {
+                directory.toFile().deleteRecursively()
+            }
+        }
+
+        test("every content mutation requires a bearer token") {
+            withApi {
+                val id = UUID.randomUUID()
+                val responses = listOf(
+                    client.createQuestion(),
+                    client.patch("/api/v1/questions/$id") { jsonBody("""{"text":"Updated?"}""") },
+                    client.delete("/api/v1/questions/$id"),
+                )
+                for (response in responses) {
+                    response.status shouldBe HttpStatusCode.Unauthorized
+                    (response.headers[HttpHeaders.WWWAuthenticate]?.startsWith("Bearer") == true) shouldBe true
+                    response.json().jsonObject.getValue("code").jsonPrimitive.content shouldBe "unauthorized"
+                }
+            }
+        }
+
+        test("login returns an expiring admin token and rejects invalid credentials") {
+            withApi {
+                val login = client.post("/api/v1/auth/login") {
+                    jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+                }
+                login.status shouldBe HttpStatusCode.OK
+                val body = login.json().jsonObject
+                body.getValue("tokenType").jsonPrimitive.content shouldBe "Bearer"
+                body.getValue("expiresIn").jsonPrimitive.long shouldBe 300L
+                val jwt = JWT.decode(body.getValue("accessToken").jsonPrimitive.content)
+                jwt.subject shouldBe ADMIN_USERNAME
+                jwt.getClaim("role").asString() shouldBe "admin"
+                jwt.expiresAt.shouldNotBeNull()
+                jwt.expiresAt.after(Date()) shouldBe true
+                body.containsKey("password") shouldBe false
+                val badPassword = client.post("/api/v1/auth/login") {
+                    jsonBody("""{"username":"$ADMIN_USERNAME","password":"wrong-password"}""")
+                }
+                val badUsername = client.post("/api/v1/auth/login") {
+                    jsonBody("""{"username":"unknown","password":"$ADMIN_PASSWORD"}""")
+                }
+                badPassword.status shouldBe HttpStatusCode.Unauthorized
+                badUsername.status shouldBe HttpStatusCode.Unauthorized
+                badUsername.json() shouldBe badPassword.json()
+                badPassword.bodyAsText().contains(ADMIN_PASSWORD) shouldBe false
+            }
+        }
+
+        test("expired forged and non-admin tokens cannot mutate content") {
+            withApi {
+                val invalidTokens = listOf(
+                    "not-a-jwt",
+                    signedToken(secret = "a-different-signing-secret-at-least-32-bytes"),
+                    signedToken(expiresAt = Instant.now().minusSeconds(60)),
+                    signedToken(role = "player"),
+                    signedToken(subject = "another-admin"),
+                    signedToken(issuer = "another-issuer"),
+                    signedToken(audience = "another-audience"),
+                    signedToken(expiresAt = null),
+                )
+                for (token in invalidTokens) client.createQuestion(token).status shouldBe HttpStatusCode.Unauthorized
+                client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
+            }
+        }
+
+        test("invalid questions return client errors without creating content") {
+            withApi {
                 val token = client.login()
-                assertEquals(HttpStatusCode.NoContent, client.delete("/api/v1/questions/$id") { bearerAuth(token) }.status)
+                val bodies = listOf(
+                    """{"text":" ","options":["JPY","EUR"],"correctAnswer":"JPY"}""",
+                    """{"text":"Currency?","options":["JPY"],"correctAnswer":"JPY"}""",
+                    """{"text":"Currency?","options":["JPY"," jpy "],"correctAnswer":"JPY"}""",
+                    """{"text":"Currency?","options":["JPY"," "],"correctAnswer":"JPY"}""",
+                    """{"text":"Currency?","options":["JPY","EUR"],"correctAnswer":"USD"}""",
+                    """{"text":"Currency?","options":["JPY","EUR"],"correctAnswer":" "}""",
+                    questionBody(text = "x".repeat(501)),
+                    questionBody(options = (1..11).map { "Option $it" }, correctAnswer = "Option 1"),
+                    questionBody(options = listOf("JPY", "x".repeat(201))),
+                )
+                for (body in bodies) {
+                    val response = client.post("/api/v1/questions") { bearerAuth(token); jsonBody(body) }
+                    withClue(body) { response.status shouldBe HttpStatusCode.BadRequest }
+                    response.json().jsonObject.getValue("message").jsonPrimitive.content.isNotBlank() shouldBe true
+                }
+                client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
             }
-            runApi(storage) { assertEquals(JsonArray(emptyList()), client.get("/api/v1/questions").json()) }
-        } finally {
-            directory.toFile().deleteRecursively()
         }
-    }
 
-    @Test
-    fun `admin credentials and signing key cannot silently use insecure defaults`() {
-        val required = listOf(
-            "security.adminUsername" to ADMIN_USERNAME,
-            "security.adminPassword" to ADMIN_PASSWORD,
-            "security.jwtSecret" to JWT_SECRET,
-        )
-        for (missing in required) {
-            val config = MapApplicationConfig(*required.filterNot { it.first == missing.first }.toTypedArray())
-            assertFailsWith<IllegalStateException> { ApiSettings.from(config) }
-        }
-        val weakSecret = MapApplicationConfig(*required.map { if (it.first == "security.jwtSecret") it.first to "secret" else it }.toTypedArray())
-        assertFailsWith<IllegalArgumentException> { ApiSettings.from(weakSecret) }
-    }
-
-    @Test
-    fun `Swagger UI links to the publicly served API specification`() = withApi {
-        val response = client.get("/openapi")
-        assertEquals(HttpStatusCode.OK, response.status)
-        assertEquals(ContentType.Text.Html, response.contentType()?.withoutParameters())
-        val html = response.bodyAsText()
-        assertContains(html, "SwaggerUIBundle")
-        val specificationPath = Regex("""url:\s*'([^']+)'""").find(html)?.groupValues?.get(1)
-        assertEquals("/openapi/documentation.yaml", specificationPath)
-        val specification = client.get(assertNotNull(specificationPath))
-        assertEquals(HttpStatusCode.OK, specification.status)
-        val yaml = specification.bodyAsText()
-        assertContains(yaml, "openapi:")
-        assertContains(yaml, "title: Currency quiz API")
-        assertContains(yaml, "/api/v1/questions:")
-        assertContains(yaml, "/api/v1/auth/login:")
-    }
-
-    @Test
-    fun `body endpoints reject non-JSON media types with a consistent JSON error`() = withApi {
-        val token = client.login()
-        val id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
-        for (path in listOf("/api/v1/auth/login", "/api/v1/questions", "/api/v1/questions/$id/answers")) {
-            val response = client.post(path) {
-                bearerAuth(token)
-                contentType(ContentType.Text.Plain)
-                setBody("not JSON")
+        test("malformed and incomplete JSON returns a safe client error") {
+            withApi {
+                val token = client.login()
+                for (body in listOf("{", "{}", "null", "[]", """{"text":42,"options":[],"correctAnswer":"JPY"}""")) {
+                    val response = client.post("/api/v1/questions") { bearerAuth(token); jsonBody(body) }
+                    withClue(body) { response.status shouldBe HttpStatusCode.BadRequest }
+                    response.json().jsonObject.getValue("code").jsonPrimitive.content.isNotBlank() shouldBe true
+                    response.bodyAsText().contains("Exception") shouldBe false
+                }
             }
-            assertEquals(HttpStatusCode.UnsupportedMediaType, response.status, path)
-            assertEquals(ContentType.Application.Json, response.contentType()?.withoutParameters())
-            assertEquals("unsupported_media_type", response.json().jsonObject.getValue("code").jsonPrimitive.content)
+        }
+
+        test("patch validates the resulting question and preserves content when rejected") {
+            withApi {
+                val token = client.login()
+                val original = client.createQuestion(token).json().jsonObject
+                val id = original.getValue("id").jsonPrimitive.content
+                for (patch in listOf("{}", """{"text":" "}""", """{"options":["EUR","USD"]}""", """{"correctAnswer":"USD"}""")) {
+                    val response = client.patch("/api/v1/questions/$id") { bearerAuth(token); jsonBody(patch) }
+                    withClue(patch) { response.status shouldBe HttpStatusCode.BadRequest }
+                    val unchanged = client.get("/api/v1/questions/$id").json().jsonObject
+                    unchanged.getValue("text") shouldBe original.getValue("text")
+                    unchanged.getValue("options") shouldBe original.getValue("options")
+                }
+                val updated = client.patch("/api/v1/questions/$id") {
+                    bearerAuth(token)
+                    jsonBody("""{"options":["EUR","USD"],"correctAnswer":"USD"}""")
+                }
+                updated.status shouldBe HttpStatusCode.OK
+                for ((answer, correct) in listOf("JPY" to false, "USD" to true)) {
+                    val result = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"$answer"}""") }
+                    result.json().jsonObject.getValue("correct").jsonPrimitive.boolean shouldBe correct
+                }
+            }
+        }
+
+        test("blank missing and oversized answers are invalid") {
+            withApi {
+                val id = client.createQuestion(client.login()).json().jsonObject.getValue("id").jsonPrimitive.content
+                for (body in listOf("{}", """{"answer":"  "}""", buildJsonObject { put("answer", "x".repeat(201)) }.toString())) {
+                    client.post("/api/v1/questions/$id/answers") { jsonBody(body) }.status shouldBe HttpStatusCode.BadRequest
+                }
+            }
+        }
+
+        test("malformed IDs and nonexistent questions produce distinct errors") {
+            withApi {
+                val token = client.login()
+                for ((id, status) in listOf("not-a-uuid" to HttpStatusCode.BadRequest, UUID.randomUUID().toString() to HttpStatusCode.NotFound)) {
+                    client.get("/api/v1/questions/$id").status shouldBe status
+                    client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"JPY"}""") }.status shouldBe status
+                    client.patch("/api/v1/questions/$id") { bearerAuth(token); jsonBody("""{"text":"New question?"}""") }.status shouldBe status
+                    client.delete("/api/v1/questions/$id") { bearerAuth(token) }.status shouldBe status
+                }
+                val unknownRoute = client.get("/api/v1/missing")
+                unknownRoute.status shouldBe HttpStatusCode.NotFound
+                unknownRoute.json().jsonObject.containsKey("message") shouldBe true
+            }
+        }
+
+        test("login rate limit returns Retry-After without blocking public reads") {
+            withApi {
+                repeat(5) {
+                    client.post("/api/v1/auth/login") {
+                        jsonBody("""{"username":"$ADMIN_USERNAME","password":"incorrect"}""")
+                    }.status shouldBe HttpStatusCode.Unauthorized
+                }
+                val throttled = client.post("/api/v1/auth/login") {
+                    jsonBody("""{"username":"$ADMIN_USERNAME","password":"incorrect"}""")
+                }
+                throttled.status shouldBe HttpStatusCode.TooManyRequests
+                throttled.headers[HttpHeaders.RetryAfter].shouldNotBeNull()
+                throttled.json().jsonObject.containsKey("message") shouldBe true
+                client.get("/api/v1/questions").status shouldBe HttpStatusCode.OK
+            }
+        }
+
+        test("answer submissions have a separate rate limit") {
+            withApi {
+                val token = client.login()
+                val id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
+                repeat(30) {
+                    client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"EUR"}""") }.status shouldBe HttpStatusCode.OK
+                }
+                val throttled = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"EUR"}""") }
+                throttled.status shouldBe HttpStatusCode.TooManyRequests
+                throttled.headers[HttpHeaders.RetryAfter].shouldNotBeNull()
+                client.get("/api/v1/questions").status shouldBe HttpStatusCode.OK
+                client.createQuestion(token).status shouldBe HttpStatusCode.Created
+            }
+        }
+
+        test("CORS permits configured frontend JSON requests and rejects other origins") {
+            withApi {
+                val preflight = client.options("/api/v1/questions") {
+                    header(HttpHeaders.Origin, FRONTEND_ORIGIN)
+                    header(HttpHeaders.AccessControlRequestMethod, "PATCH")
+                    header(HttpHeaders.AccessControlRequestHeaders, "authorization,content-type")
+                }
+                preflight.status.isSuccess() shouldBe true
+                preflight.headers[HttpHeaders.AccessControlAllowOrigin] shouldBe FRONTEND_ORIGIN
+                (preflight.headers[HttpHeaders.AccessControlAllowMethods]?.contains("PATCH") == true) shouldBe true
+                val publicRead = client.get("/api/v1/questions") { header(HttpHeaders.Origin, FRONTEND_ORIGIN) }
+                publicRead.headers[HttpHeaders.AccessControlAllowOrigin] shouldBe FRONTEND_ORIGIN
+                val otherOrigin = client.get("/api/v1/questions") { header(HttpHeaders.Origin, "https://untrusted.example") }
+                otherOrigin.headers[HttpHeaders.AccessControlAllowOrigin].shouldBeNull()
+            }
+        }
+
+        test("wildcard CORS permits arbitrary frontend origins without credentials") {
+            for (allowedOrigins in listOf("*", "$FRONTEND_ORIGIN,*")) {
+                withApi(allowedOrigins = allowedOrigins) {
+                    for (origin in listOf("https://quiz.school.example", "http://localhost:4321", "https://another-frontend.example:8443")) {
+                        val response = client.get("/api/v1/questions") { header(HttpHeaders.Origin, origin) }
+                        response.status shouldBe HttpStatusCode.OK
+                        assertWildcardCors(response)
+                        response.json() shouldBe JsonArray(emptyList())
+                    }
+                }
+            }
+        }
+
+        test("wildcard CORS permits JSON and bearer authorization preflights for supported methods") {
+            withApi(allowedOrigins = "*") {
+                val id = UUID.randomUUID()
+                val requests = listOf(
+                    Triple("/api/v1/auth/login", "POST", "content-type"),
+                    Triple("/api/v1/questions/$id/answers", "POST", "content-type"),
+                    Triple("/api/v1/questions", "POST", "authorization,content-type"),
+                    Triple("/api/v1/questions/$id", "PATCH", "authorization,content-type"),
+                    Triple("/api/v1/questions/$id", "DELETE", "authorization"),
+                )
+                for ((path, method, requestedHeaders) in requests) {
+                    val response = client.options(path) {
+                        header(HttpHeaders.Origin, "https://any-frontend.example")
+                        header(HttpHeaders.AccessControlRequestMethod, method)
+                        header(HttpHeaders.AccessControlRequestHeaders, requestedHeaders)
+                    }
+                    withClue("$method $path") { response.status.isSuccess() shouldBe true }
+                    assertWildcardCors(response)
+                    val methods = response.headers[HttpHeaders.AccessControlAllowMethods].orEmpty().split(',').map(String::trim)
+                    methods.shouldContain(method)
+                    val headers = response.headers[HttpHeaders.AccessControlAllowHeaders].orEmpty()
+                        .split(',').map { it.trim().lowercase() }
+                    for (requestedHeader in requestedHeaders.split(',')) headers.shouldContain(requestedHeader)
+                }
+            }
+        }
+
+        test("wildcard CORS preserves bearer protection and authenticated question management") {
+            withApi(allowedOrigins = "*") {
+                val origin = "https://any-admin-frontend.example"
+                val missingId = UUID.randomUUID()
+                val unauthorized = listOf(
+                    client.post("/api/v1/questions") {
+                        header(HttpHeaders.Origin, origin)
+                        jsonBody(questionBody())
+                    },
+                    client.patch("/api/v1/questions/$missingId") {
+                        header(HttpHeaders.Origin, origin)
+                        jsonBody("""{"text":"Updated?"}""")
+                    },
+                    client.delete("/api/v1/questions/$missingId") { header(HttpHeaders.Origin, origin) },
+                )
+                for (response in unauthorized) {
+                    response.status shouldBe HttpStatusCode.Unauthorized
+                    (response.headers[HttpHeaders.WWWAuthenticate]?.startsWith("Bearer") == true) shouldBe true
+                    assertWildcardCors(response)
+                }
+
+                val login = client.post("/api/v1/auth/login") {
+                    header(HttpHeaders.Origin, origin)
+                    jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+                }
+                login.status shouldBe HttpStatusCode.OK
+                assertWildcardCors(login)
+                val token = login.json().jsonObject.getValue("accessToken").jsonPrimitive.content
+                val created = client.post("/api/v1/questions") {
+                    header(HttpHeaders.Origin, origin)
+                    bearerAuth(token)
+                    jsonBody(questionBody())
+                }
+                created.status shouldBe HttpStatusCode.Created
+                assertWildcardCors(created)
+                val id = created.json().jsonObject.getValue("id").jsonPrimitive.content
+
+                val updated = client.patch("/api/v1/questions/$id") {
+                    header(HttpHeaders.Origin, origin)
+                    bearerAuth(token)
+                    jsonBody("""{"text":"Updated from another origin?"}""")
+                }
+                updated.status shouldBe HttpStatusCode.OK
+                assertWildcardCors(updated)
+                updated.json().jsonObject.getValue("text").jsonPrimitive.content shouldBe "Updated from another origin?"
+                val deleted = client.delete("/api/v1/questions/$id") {
+                    header(HttpHeaders.Origin, origin)
+                    bearerAuth(token)
+                }
+                deleted.status shouldBe HttpStatusCode.NoContent
+                assertWildcardCors(deleted)
+                client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
+            }
+        }
+
+        test("wildcard origins cannot bypass the answer rate limit") {
+            withApi(allowedOrigins = "*") {
+                val id = client.createQuestion(client.login()).json().jsonObject.getValue("id").jsonPrimitive.content
+                repeat(30) { index ->
+                    val response = client.post("/api/v1/questions/$id/answers") {
+                        header(HttpHeaders.Origin, "https://frontend-$index.example")
+                        jsonBody("""{"answer":"EUR"}""")
+                    }
+                    response.status shouldBe HttpStatusCode.OK
+                    assertWildcardCors(response)
+                }
+                val throttled = client.post("/api/v1/questions/$id/answers") {
+                    header(HttpHeaders.Origin, "https://one-more-frontend.example")
+                    jsonBody("""{"answer":"EUR"}""")
+                }
+                throttled.status shouldBe HttpStatusCode.TooManyRequests
+                throttled.headers[HttpHeaders.RetryAfter].shouldNotBeNull()
+                assertWildcardCors(throttled)
+            }
+        }
+
+        test("created and edited questions survive restart and deletions persist") {
+            val directory = Files.createTempDirectory("currencyquiz-persistence-test-")
+            val storage = directory.resolve("questions.json")
+            var id = ""
+            try {
+                runApi(storage) {
+                    val token = client.login()
+                    id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
+                    client.patch("/api/v1/questions/$id") {
+                        bearerAuth(token)
+                        jsonBody("""{"text":"Persisted question?"}""")
+                    }.status shouldBe HttpStatusCode.OK
+                }
+                Files.exists(storage) shouldBe true
+                runApi(storage) {
+                    val restored = client.get("/api/v1/questions/$id")
+                    restored.status shouldBe HttpStatusCode.OK
+                    restored.json().jsonObject.getValue("text").jsonPrimitive.content shouldBe "Persisted question?"
+                    val answer = client.post("/api/v1/questions/$id/answers") { jsonBody("""{"answer":"JPY"}""") }
+                    answer.json().jsonObject.getValue("correct").jsonPrimitive.boolean shouldBe true
+                    val token = client.login()
+                    client.delete("/api/v1/questions/$id") { bearerAuth(token) }.status shouldBe HttpStatusCode.NoContent
+                }
+                runApi(storage) { client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList()) }
+            } finally {
+                directory.toFile().deleteRecursively()
+            }
+        }
+
+        test("admin credentials and signing key cannot silently use insecure defaults") {
+            val required = listOf(
+                "security.adminUsername" to ADMIN_USERNAME,
+                "security.adminPassword" to ADMIN_PASSWORD,
+                "security.jwtSecret" to JWT_SECRET,
+            )
+            for (missing in required) {
+                val config = MapApplicationConfig(*required.filterNot { it.first == missing.first }.toTypedArray())
+                shouldThrow<IllegalStateException> { ApiSettings.from(config) }
+            }
+            val weakSecret = MapApplicationConfig(*required.map { if (it.first == "security.jwtSecret") it.first to "secret" else it }.toTypedArray())
+            shouldThrow<IllegalArgumentException> { ApiSettings.from(weakSecret) }
+        }
+
+        test("Swagger UI links to the publicly served API specification") {
+            withApi {
+                val response = client.get("/openapi")
+                response.status shouldBe HttpStatusCode.OK
+                response.contentType()?.withoutParameters() shouldBe ContentType.Text.Html
+                val html = response.bodyAsText()
+                html.shouldContain("SwaggerUIBundle")
+                val specificationPath = Regex("""url:\s*'([^']+)'""").find(html)?.groupValues?.get(1)
+                specificationPath shouldBe "/openapi/documentation.yaml"
+                val specification = client.get(specificationPath.shouldNotBeNull())
+                specification.status shouldBe HttpStatusCode.OK
+                val yaml = specification.bodyAsText()
+                yaml.shouldContain("openapi:")
+                yaml.shouldContain("title: Currency quiz API")
+                yaml.shouldContain("/api/v1/questions:")
+                yaml.shouldContain("/api/v1/auth/login:")
+            }
+        }
+
+        test("body endpoints reject non-JSON media types with a consistent JSON error") {
+            withApi {
+                val token = client.login()
+                val id = client.createQuestion(token).json().jsonObject.getValue("id").jsonPrimitive.content
+                for (path in listOf("/api/v1/auth/login", "/api/v1/questions", "/api/v1/questions/$id/answers")) {
+                    val response = client.post(path) {
+                        bearerAuth(token)
+                        contentType(ContentType.Text.Plain)
+                        setBody("not JSON")
+                    }
+                    withClue(path) { response.status shouldBe HttpStatusCode.UnsupportedMediaType }
+                    response.contentType()?.withoutParameters() shouldBe ContentType.Application.Json
+                    response.json().jsonObject.getValue("code").jsonPrimitive.content shouldBe "unsupported_media_type"
+                }
+            }
+        }
+
+        test("PATCH treats null as omitted and rejects unknown fields without changing content") {
+            withApi {
+                val token = client.login()
+                val original = client.createQuestion(token).json().jsonObject
+                val id = original.getValue("id").jsonPrimitive.content
+                val patched = client.patch("/api/v1/questions/$id") {
+                    bearerAuth(token)
+                    jsonBody("""{"text":"Updated question?","options":null,"correctAnswer":null}""")
+                }
+                patched.status shouldBe HttpStatusCode.OK
+                patched.json().jsonObject.getValue("text").jsonPrimitive.content shouldBe "Updated question?"
+                patched.json().jsonObject.getValue("options") shouldBe original.getValue("options")
+                patched.json().jsonObject.getValue("correctAnswer") shouldBe original.getValue("correctAnswer")
+                for (body in listOf("""{"text":null,"options":null,"correctAnswer":null}""", """{"text":"Unexpected update?","unknown":true}""")) {
+                    client.patch("/api/v1/questions/$id") {
+                        bearerAuth(token)
+                        jsonBody(body)
+                    }.status shouldBe HttpStatusCode.BadRequest
+                }
+                client.get("/api/v1/questions/$id").json().jsonObject.getValue("text").jsonPrimitive.content shouldBe "Updated question?"
+                client.post("/api/v1/questions/$id/answers") {
+                    jsonBody("""{"answer":"JPY","unknown":true}""")
+                }.status shouldBe HttpStatusCode.BadRequest
+            }
+        }
+
+        test("unexpected repository failures return sanitized JSON without internal details") {
+            testApplication {
+                environment { config = MapApplicationConfig() }
+                val internalDetail = "internal-storage-password-do-not-return"
+                val repository = object : QuestionRepository {
+                    override suspend fun all(): List<Question> = error(internalDetail)
+                    override suspend fun find(id: String): Question? = error(internalDetail)
+                    override suspend fun create(request: CreateQuestionRequest): Question = error(internalDetail)
+                    override suspend fun update(id: String, request: UpdateQuestionRequest): Question? = error(internalDetail)
+                    override suspend fun delete(id: String): Boolean = error(internalDetail)
+                }
+                application { quizModule(ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET), repository) }
+                val response = client.get("/api/v1/questions")
+                response.status shouldBe HttpStatusCode.InternalServerError
+                response.contentType()?.withoutParameters() shouldBe ContentType.Application.Json
+                response.json().jsonObject.getValue("code").jsonPrimitive.content shouldBe "internal_error"
+                response.json().jsonObject.getValue("message").jsonPrimitive.content shouldBe "An unexpected error occurred"
+                response.bodyAsText().contains(internalDetail) shouldBe false
+                response.bodyAsText().contains("IllegalStateException") shouldBe false
+            }
         }
     }
 
-    @Test
-    fun `PATCH treats null as omitted and rejects unknown fields without changing content`() = withApi {
-        val token = client.login()
-        val original = client.createQuestion(token).json().jsonObject
-        val id = original.getValue("id").jsonPrimitive.content
-        val patched = client.patch("/api/v1/questions/$id") {
-            bearerAuth(token)
-            jsonBody("""{"text":"Updated question?","options":null,"correctAnswer":null}""")
-        }
-        assertEquals(HttpStatusCode.OK, patched.status)
-        assertEquals("Updated question?", patched.json().jsonObject.getValue("text").jsonPrimitive.content)
-        assertEquals(original.getValue("options"), patched.json().jsonObject.getValue("options"))
-        assertEquals(original.getValue("correctAnswer"), patched.json().jsonObject.getValue("correctAnswer"))
-        for (body in listOf("""{"text":null,"options":null,"correctAnswer":null}""", """{"text":"Unexpected update?","unknown":true}""")) {
-            assertEquals(HttpStatusCode.BadRequest, client.patch("/api/v1/questions/$id") {
-                bearerAuth(token)
-                jsonBody(body)
-            }.status)
-        }
-        assertEquals("Updated question?", client.get("/api/v1/questions/$id").json().jsonObject.getValue("text").jsonPrimitive.content)
-        assertEquals(HttpStatusCode.BadRequest, client.post("/api/v1/questions/$id/answers") {
-            jsonBody("""{"answer":"JPY","unknown":true}""")
-        }.status)
-    }
-
-    @Test
-    fun `unexpected repository failures return sanitized JSON without internal details`() = testApplication {
-        environment { config = MapApplicationConfig() }
-        val internalDetail = "internal-storage-password-do-not-return"
-        val repository = object : QuestionRepository {
-            override suspend fun all(): List<Question> = error(internalDetail)
-            override suspend fun find(id: String): Question? = error(internalDetail)
-            override suspend fun create(request: CreateQuestionRequest): Question = error(internalDetail)
-            override suspend fun update(id: String, request: UpdateQuestionRequest): Question? = error(internalDetail)
-            override suspend fun delete(id: String): Boolean = error(internalDetail)
-        }
-        application { quizModule(ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET), repository) }
-        val response = client.get("/api/v1/questions")
-        assertEquals(HttpStatusCode.InternalServerError, response.status)
-        assertEquals(ContentType.Application.Json, response.contentType()?.withoutParameters())
-        assertEquals("internal_error", response.json().jsonObject.getValue("code").jsonPrimitive.content)
-        assertEquals("An unexpected error occurred", response.json().jsonObject.getValue("message").jsonPrimitive.content)
-        assertFalse(response.bodyAsText().contains(internalDetail))
-        assertFalse(response.bodyAsText().contains("IllegalStateException"))
-    }
-
-    private fun assertPublicQuestion(question: JsonObject) = assertEquals(setOf("id", "text", "options"), question.keys)
+    private fun assertPublicQuestion(question: JsonObject) = question.keys shouldBe setOf("id", "text", "options")
 
     private fun assertWildcardCors(response: HttpResponse) {
-        assertEquals("*", response.headers[HttpHeaders.AccessControlAllowOrigin])
-        assertNull(response.headers[HttpHeaders.AccessControlAllowCredentials])
+        response.headers[HttpHeaders.AccessControlAllowOrigin] shouldBe "*"
+        response.headers[HttpHeaders.AccessControlAllowCredentials].shouldBeNull()
     }
 
     private fun withApi(allowedOrigins: String = FRONTEND_ORIGIN, block: suspend ApplicationTestBuilder.() -> Unit) {
@@ -569,7 +592,7 @@ class ServerTest {
         val response = post("/api/v1/auth/login") {
             jsonBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
         }
-        assertEquals(HttpStatusCode.OK, response.status, response.bodyAsText())
+        withClue(response.bodyAsText()) { response.status shouldBe HttpStatusCode.OK }
         return response.json().jsonObject.getValue("accessToken").jsonPrimitive.content
     }
 

@@ -1,13 +1,22 @@
 [versions]
 dotenv = "6.5.1"
+jacoco = "0.8.16"
+junit = "6.1.3"
 kotlin = "2.4.21"
+kotest = "6.2.6"
 logback = "1.6.6"
+mockk = "1.14.11"
 openapi-generator = "7.27.0"
 openapi-validator = "3.0.0"
 
 [libraries]
 dotenv-kotlin = { module = "io.github.cdimascio:dotenv-kotlin", version.ref = "dotenv" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+kotest-assertions = { module = "io.kotest:kotest-assertions-core", version.ref = "kotest" }
+kotest-runner = { module = "io.kotest:kotest-runner-junit6", version.ref = "kotest" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+mockk = { module = "io.mockk:mockk-jvm", version.ref = "mockk" }
 openapi-validator = { module = "com.atlassian.oai:openapi-request-validator-core", version.ref = "openapi-validator" }
 
 [plugins]

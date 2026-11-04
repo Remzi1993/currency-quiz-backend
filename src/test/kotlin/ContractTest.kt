@@ -4,6 +4,10 @@ import com.atlassian.oai.validator.OpenApiInteractionValidator
 import com.atlassian.oai.validator.model.Request
 import com.atlassian.oai.validator.model.SimpleRequest
 import com.atlassian.oai.validator.model.SimpleResponse
+import io.kotest.assertions.withClue
+import io.kotest.core.spec.style.FunSpec
+import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.shouldBe
 import io.ktor.client.HttpClient
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -11,190 +15,192 @@ import io.ktor.http.*
 import io.ktor.server.config.MapApplicationConfig
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
-import kotlinx.serialization.json.*
 import java.nio.file.Files
 import java.util.UUID
-import kotlin.test.*
+import kotlinx.serialization.json.*
 
-class ContractTest {
+class ContractTest : FunSpec() {
     private val validator by lazy {
-        val specification = assertNotNull(javaClass.getResourceAsStream("/documentation.yaml"))
+        val specification = javaClass.getResourceAsStream("/documentation.yaml").shouldNotBeNull()
             .bufferedReader().use { it.readText() }
         OpenApiInteractionValidator.createForInlineApiSpecification(specification).build()
     }
 
-    @Test
-    fun `browser login refresh activity and logout responses conform to shared contract`() = withApi {
-        val sessionPath = "/api/v1/auth/session"
-        suspend fun check(response: HttpResponse, path: String, method: Request.Method, status: HttpStatusCode) {
-            assertEquals(status, response.status)
-            val actual = SimpleResponse.Builder.status(response.status.value)
-            response.headers.entries().forEach { (name, values) -> actual.withHeader(name, values) }
-            val body = response.bodyAsText()
-            if (body.isNotEmpty()) actual.withBody(body)
-            val report = validator.validateResponse(path, method, actual.build())
-            assertFalse(report.hasErrors(), report.messages.joinToString { it.message })
-            assertEquals("no-store", response.headers[HttpHeaders.CacheControl])
+    init {
+        test("browser login refresh activity and logout responses conform to shared contract") {
+            withApi {
+                val sessionPath = "/api/v1/auth/session"
+                suspend fun check(response: HttpResponse, path: String, method: Request.Method, status: HttpStatusCode) {
+                    response.status shouldBe status
+                    val actual = SimpleResponse.Builder.status(response.status.value)
+                    response.headers.entries().forEach { (name, values) -> actual.withHeader(name, values) }
+                    val body = response.bodyAsText()
+                    if (body.isNotEmpty()) actual.withBody(body)
+                    val report = validator.validateResponse(path, method, actual.build())
+                    withClue(report.messages.joinToString { it.message }) { report.hasErrors() shouldBe false }
+                    response.headers[HttpHeaders.CacheControl] shouldBe "no-store"
+                }
+                val login = client.post(sessionPath) {
+                    header(HttpHeaders.Origin, "http://localhost:5173")
+                    contentType(ContentType.Application.Json)
+                    setBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+                }
+                check(login, sessionPath, Request.Method.POST, HttpStatusCode.OK)
+                val csrf = login.json().jsonObject.getValue("csrfToken").jsonPrimitive.content
+                fun HttpResponse.cookies() = headers.getAll(HttpHeaders.SetCookie).orEmpty().joinToString("; ") { it.substringBefore(';') }
+                val read = client.get(sessionPath) { header(HttpHeaders.Cookie, login.cookies()) }
+                check(read, sessionPath, Request.Method.GET, HttpStatusCode.OK)
+                val refreshed = client.post("$sessionPath/refresh") {
+                    header(HttpHeaders.Origin, "http://localhost:5173")
+                    header(HttpHeaders.Cookie, login.cookies())
+                    header(CSRF_HEADER, csrf)
+                }
+                check(refreshed, "$sessionPath/refresh", Request.Method.POST, HttpStatusCode.OK)
+                val activity = client.post("$sessionPath/activity") {
+                    header(HttpHeaders.Origin, "http://localhost:5173")
+                    header(HttpHeaders.Cookie, refreshed.cookies())
+                    header(CSRF_HEADER, csrf)
+                }
+                check(activity, "$sessionPath/activity", Request.Method.POST, HttpStatusCode.OK)
+                val logout = client.delete(sessionPath) {
+                    header(HttpHeaders.Origin, "http://localhost:5173")
+                    header(HttpHeaders.Cookie, refreshed.cookies())
+                    header(CSRF_HEADER, csrf)
+                }
+                check(logout, sessionPath, Request.Method.DELETE, HttpStatusCode.NoContent)
+            }
         }
-        val login = client.post(sessionPath) {
-            header(HttpHeaders.Origin, "http://localhost:5173")
-            contentType(ContentType.Application.Json)
-            setBody("""{"username":"$ADMIN_USERNAME","password":"$ADMIN_PASSWORD"}""")
+
+        test("real quiz interactions conform to the bundled shared contract") {
+            withApi {
+                client.checkContract(HttpMethod.Get, "/api/v1/questions", HttpStatusCode.OK)
+                val token = client.login()
+                val created = client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Created,
+                    body = QUESTION_BODY, token = token,
+                )
+                val id = created.json().jsonObject.getValue("id").jsonPrimitive.content
+                created.headers[HttpHeaders.Location] shouldBe "/api/v1/questions/$id"
+
+                val listing = client.checkContract(HttpMethod.Get, "/api/v1/questions", HttpStatusCode.OK)
+                val publicQuestion = client.checkContract(HttpMethod.Get, "/api/v1/questions/$id", HttpStatusCode.OK)
+                publicQuestion.json().jsonObject.keys shouldBe setOf("id", "text", "options")
+                listing.json().jsonArray.single().jsonObject.containsKey("correctAnswer") shouldBe false
+
+                val wrongAnswer = client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions/$id/answers", HttpStatusCode.OK,
+                    body = """{"answer":"EUR"}""",
+                )
+                wrongAnswer.json() shouldBe buildJsonObject { put("correct", false) }
+                client.checkContract(
+                    HttpMethod.Patch, "/api/v1/questions/$id", HttpStatusCode.OK, token = token,
+                    body = """{"text":"Updated contract question?","options":null,"correctAnswer":null}""",
+                )
+                val deleted = client.checkContract(
+                    HttpMethod.Delete, "/api/v1/questions/$id", HttpStatusCode.NoContent, token = token,
+                )
+                deleted.bodyAsText() shouldBe ""
+            }
         }
-        check(login, sessionPath, Request.Method.POST, HttpStatusCode.OK)
-        val csrf = login.json().jsonObject.getValue("csrfToken").jsonPrimitive.content
-        fun HttpResponse.cookies() = headers.getAll(HttpHeaders.SetCookie).orEmpty().joinToString("; ") { it.substringBefore(';') }
-        val read = client.get(sessionPath) { header(HttpHeaders.Cookie, login.cookies()) }
-        check(read, sessionPath, Request.Method.GET, HttpStatusCode.OK)
-        val refreshed = client.post("$sessionPath/refresh") {
-            header(HttpHeaders.Origin, "http://localhost:5173")
-            header(HttpHeaders.Cookie, login.cookies())
-            header(CSRF_HEADER, csrf)
+
+        test("real invalid requests return errors described by the shared contract") {
+            withApi {
+                client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Unauthorized,
+                    body = QUESTION_BODY, validateRequest = false,
+                )
+                client.checkContract(
+                    HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.Unauthorized,
+                    body = INVALID_LOGIN_BODY,
+                )
+                val token = client.login()
+                val id = client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Created,
+                    body = QUESTION_BODY, token = token,
+                ).json().jsonObject.getValue("id").jsonPrimitive.content
+
+                client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions", HttpStatusCode.BadRequest,
+                    body = "{", token = token, validateRequest = false,
+                )
+                client.checkContract(
+                    HttpMethod.Patch, "/api/v1/questions/$id", HttpStatusCode.BadRequest,
+                    body = """{"text":null,"options":null,"correctAnswer":null}""",
+                    token = token, validateRequest = false,
+                )
+                client.checkContract(
+                    HttpMethod.Get, "/api/v1/questions/not-a-uuid", HttpStatusCode.BadRequest,
+                    validateRequest = false,
+                )
+                client.checkContract(
+                    HttpMethod.Get, "/api/v1/questions/${UUID.randomUUID()}", HttpStatusCode.NotFound,
+                )
+                client.checkContract(
+                    HttpMethod.Post, "/api/v1/questions/$id/answers", HttpStatusCode.UnsupportedMediaType,
+                    body = "JPY", contentType = ContentType.Text.Plain, validateRequest = false,
+                )
+
+                // Two login requests above have consumed two of the five available attempts.
+                repeat(3) {
+                    client.checkContract(
+                        HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.Unauthorized,
+                        body = INVALID_LOGIN_BODY,
+                    )
+                }
+                val throttled = client.checkContract(
+                    HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.TooManyRequests,
+                    body = INVALID_LOGIN_BODY,
+                )
+                throttled.headers[HttpHeaders.RetryAfter].shouldNotBeNull()
+            }
         }
-        check(refreshed, "$sessionPath/refresh", Request.Method.POST, HttpStatusCode.OK)
-        val activity = client.post("$sessionPath/activity") {
-            header(HttpHeaders.Origin, "http://localhost:5173")
-            header(HttpHeaders.Cookie, refreshed.cookies())
-            header(CSRF_HEADER, csrf)
-        }
-        check(activity, "$sessionPath/activity", Request.Method.POST, HttpStatusCode.OK)
-        val logout = client.delete(sessionPath) {
-            header(HttpHeaders.Origin, "http://localhost:5173")
-            header(HttpHeaders.Cookie, refreshed.cookies())
-            header(CSRF_HEADER, csrf)
-        }
-        check(logout, sessionPath, Request.Method.DELETE, HttpStatusCode.NoContent)
-    }
 
-    @Test
-    fun `real quiz interactions conform to the bundled shared contract`() = withApi {
-        client.checkContract(HttpMethod.Get, "/api/v1/questions", HttpStatusCode.OK)
-        val token = client.login()
-        val created = client.checkContract(
-            HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Created,
-            body = QUESTION_BODY, token = token,
-        )
-        val id = created.json().jsonObject.getValue("id").jsonPrimitive.content
-        assertEquals("/api/v1/questions/$id", created.headers[HttpHeaders.Location])
-
-        val listing = client.checkContract(HttpMethod.Get, "/api/v1/questions", HttpStatusCode.OK)
-        val publicQuestion = client.checkContract(HttpMethod.Get, "/api/v1/questions/$id", HttpStatusCode.OK)
-        assertEquals(setOf("id", "text", "options"), publicQuestion.json().jsonObject.keys)
-        assertFalse(listing.json().jsonArray.single().jsonObject.containsKey("correctAnswer"))
-
-        val wrongAnswer = client.checkContract(
-            HttpMethod.Post, "/api/v1/questions/$id/answers", HttpStatusCode.OK,
-            body = """{"answer":"EUR"}""",
-        )
-        assertEquals(buildJsonObject { put("correct", false) }, wrongAnswer.json())
-        client.checkContract(
-            HttpMethod.Patch, "/api/v1/questions/$id", HttpStatusCode.OK, token = token,
-            body = """{"text":"Updated contract question?","options":null,"correctAnswer":null}""",
-        )
-        val deleted = client.checkContract(
-            HttpMethod.Delete, "/api/v1/questions/$id", HttpStatusCode.NoContent, token = token,
-        )
-        assertEquals("", deleted.bodyAsText())
-    }
-
-    @Test
-    fun `real invalid requests return errors described by the shared contract`() = withApi {
-        client.checkContract(
-            HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Unauthorized,
-            body = QUESTION_BODY, validateRequest = false,
-        )
-        client.checkContract(
-            HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.Unauthorized,
-            body = INVALID_LOGIN_BODY,
-        )
-        val token = client.login()
-        val id = client.checkContract(
-            HttpMethod.Post, "/api/v1/questions", HttpStatusCode.Created,
-            body = QUESTION_BODY, token = token,
-        ).json().jsonObject.getValue("id").jsonPrimitive.content
-
-        client.checkContract(
-            HttpMethod.Post, "/api/v1/questions", HttpStatusCode.BadRequest,
-            body = "{", token = token, validateRequest = false,
-        )
-        client.checkContract(
-            HttpMethod.Patch, "/api/v1/questions/$id", HttpStatusCode.BadRequest,
-            body = """{"text":null,"options":null,"correctAnswer":null}""",
-            token = token, validateRequest = false,
-        )
-        client.checkContract(
-            HttpMethod.Get, "/api/v1/questions/not-a-uuid", HttpStatusCode.BadRequest,
-            validateRequest = false,
-        )
-        client.checkContract(
-            HttpMethod.Get, "/api/v1/questions/${UUID.randomUUID()}", HttpStatusCode.NotFound,
-        )
-        client.checkContract(
-            HttpMethod.Post, "/api/v1/questions/$id/answers", HttpStatusCode.UnsupportedMediaType,
-            body = "JPY", contentType = ContentType.Text.Plain, validateRequest = false,
-        )
-
-        // Two login requests above have consumed two of the five available attempts.
-        repeat(3) {
-            client.checkContract(
-                HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.Unauthorized,
-                body = INVALID_LOGIN_BODY,
-            )
-        }
-        val throttled = client.checkContract(
-            HttpMethod.Post, "/api/v1/auth/login", HttpStatusCode.TooManyRequests,
-            body = INVALID_LOGIN_BODY,
-        )
-        assertNotNull(throttled.headers[HttpHeaders.RetryAfter])
-    }
-
-    @Test
-    fun `contract validation catches an answer accidentally added to a public response`() {
-        val id = UUID.randomUUID().toString()
-        val publicQuestion = buildJsonObject {
-            put("id", id)
-            put("text", "Contract confidentiality check?")
-            putJsonArray("options") { add("JPY"); add("EUR") }
-        }
-        fun response(body: JsonObject) = SimpleResponse.Builder.ok()
-            .withContentType("application/json")
-            .withBody(body.toString())
-            .build()
-
-        val valid = validator.validateResponse("/api/v1/questions/$id", Request.Method.GET, response(publicQuestion))
-        assertFalse(valid.hasErrors(), valid.messages.joinToString { it.message })
-
-        val leaked = JsonObject(publicQuestion + ("correctAnswer" to JsonPrimitive("JPY")))
-        val rejected = validator.validateResponse("/api/v1/questions/$id", Request.Method.GET, response(leaked))
-        assertTrue(rejected.hasErrors(), "The shared schema must reject correctAnswer in a public response")
-        assertTrue(rejected.messages.any {
-            it.key.contains("additionalProperties", ignoreCase = true) || it.message.contains("correctAnswer")
-        }, rejected.messages.joinToString { it.message })
-    }
-
-    @Test
-    fun `shared PATCH schema requires a non-null field and permits null for other fields`() {
-        val path = "/api/v1/questions/${UUID.randomUUID()}"
-        fun validate(body: String) = validator.validateRequest(
-            SimpleRequest.Builder.patch(path)
+        test("contract validation catches an answer accidentally added to a public response") {
+            val id = UUID.randomUUID().toString()
+            val publicQuestion = buildJsonObject {
+                put("id", id)
+                put("text", "Contract confidentiality check?")
+                putJsonArray("options") { add("JPY"); add("EUR") }
+            }
+            fun response(body: JsonObject) = SimpleResponse.Builder.ok()
                 .withContentType("application/json")
-                .withAuthorization("Bearer contract-schema-test-token")
-                .withBody(body)
-                .build(),
-        )
+                .withBody(body.toString())
+                .build()
 
-        val usablePatches = listOf(
-            """{"text":"Updated question?","options":null,"correctAnswer":null}""",
-            """{"text":null,"options":["JPY","EUR"],"correctAnswer":null}""",
-            """{"text":null,"options":null,"correctAnswer":"JPY"}""",
-        )
-        for (body in usablePatches) {
-            val report = validate(body)
-            assertFalse(report.hasErrors(), "Usable PATCH rejected: $body; ${report.messages.joinToString { it.message }}")
+            val valid = validator.validateResponse("/api/v1/questions/$id", Request.Method.GET, response(publicQuestion))
+            withClue(valid.messages.joinToString { it.message }) { valid.hasErrors() shouldBe false }
+
+            val leaked = JsonObject(publicQuestion + ("correctAnswer" to JsonPrimitive("JPY")))
+            val rejected = validator.validateResponse("/api/v1/questions/$id", Request.Method.GET, response(leaked))
+            withClue("The shared schema must reject correctAnswer in a public response") { rejected.hasErrors() shouldBe true }
+            withClue(rejected.messages.joinToString { it.message }) { rejected.messages.any {
+                it.key.contains("additionalProperties", ignoreCase = true) || it.message.contains("correctAnswer")
+            } shouldBe true }
         }
-        for (body in listOf("{}", """{"text":null}""", """{"text":null,"options":null,"correctAnswer":null}""")) {
-            val report = validate(body)
-            assertTrue(report.hasErrors(), "The shared PATCH schema must reject a request without a non-null field: $body")
+
+        test("shared PATCH schema requires a non-null field and permits null for other fields") {
+            val path = "/api/v1/questions/${UUID.randomUUID()}"
+            fun validate(body: String) = validator.validateRequest(
+                SimpleRequest.Builder.patch(path)
+                    .withContentType("application/json")
+                    .withAuthorization("Bearer contract-schema-test-token")
+                    .withBody(body)
+                    .build(),
+            )
+
+            val usablePatches = listOf(
+                """{"text":"Updated question?","options":null,"correctAnswer":null}""",
+                """{"text":null,"options":["JPY","EUR"],"correctAnswer":null}""",
+                """{"text":null,"options":null,"correctAnswer":"JPY"}""",
+            )
+            for (body in usablePatches) {
+                val report = validate(body)
+                withClue("Usable PATCH rejected: $body; ${report.messages.joinToString { it.message }}") { report.hasErrors() shouldBe false }
+            }
+            for (body in listOf("{}", """{"text":null}""", """{"text":null,"options":null,"correctAnswer":null}""")) {
+                val report = validate(body)
+                withClue("The shared PATCH schema must reject a request without a non-null field: $body") { report.hasErrors() shouldBe true }
+            }
         }
     }
 
@@ -221,7 +227,7 @@ class ContractTest {
                 setBody(body)
             }
         }
-        assertEquals(expectedStatus, response.status, "$method $path returned an unexpected status")
+        withClue("$method $path returned an unexpected status") { response.status shouldBe expectedStatus }
         val responseBody = response.bodyAsText()
         val responseBuilder = SimpleResponse.Builder.status(response.status.value)
         response.headers.entries().forEach { (name, values) -> responseBuilder.withHeader(name, values) }
@@ -235,10 +241,10 @@ class ContractTest {
             // Malformed and unauthorized input is intentionally outside the valid request schema.
             validator.validateResponse(path, Request.Method.valueOf(method.value), responseBuilder.build())
         }
-        assertFalse(report.hasErrors(), buildString {
+        withClue(buildString {
             append("Shared contract violation for $method $path -> ${response.status.value}: ")
             append(report.messages.joinToString { "${it.key}: ${it.message}" })
-        })
+        }) { report.hasErrors() shouldBe false }
         return response
     }
 

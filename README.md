@@ -125,7 +125,7 @@ The command works in **PowerShell 7+ and Linux/Bash**:
 docker compose up --build --wait
 ```
 
-The image build runs the tests and packages the application. Compose starts the API in the background and waits for its 
+The image build runs the tests, verifies code coverage and packages the application. Compose starts the API in the background and waits for its
 HTTP health check at `/` to pass. The published port is bound to `127.0.0.1`. Open `http://localhost:8080`, or use the 
 host port set by `PORT` in `.env`.
 
