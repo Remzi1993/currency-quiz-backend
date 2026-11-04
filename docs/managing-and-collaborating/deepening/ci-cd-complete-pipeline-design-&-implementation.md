@@ -1,8 +1,11 @@
 # CI/CD: Complete Pipeline Design & Implementation
-- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/ci-cd-complete-pipeline-design/
-- Author: Remzi Çavdar
-- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
-  full responsibility for the accuracy, completeness and usefulness of the content.
+- **Knowledge article url:** https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/manage-and-collaborating/ci-cd-complete-pipeline-design/
+- **Author:** Remzi Çavdar
+- **AI disclosure:** I used OpenAI Codex to assist in drafting this document by analysing my codebase, identifying
+  relevant implementations, and comparing my work against the AUAS BoKSA knowledge article. Codex helped structure and
+  formulate the documentation based on these findings. I independently reviewed, verified, and edited the generated
+  content to ensure it accurately reflects my work and understanding. I take full responsibility for the accuracy,
+  completeness, and quality of this document.
 
 I want a change to reach production through repeatable checks, a tested container and a controlled release. The backend already has CI checks and containerization. The staging, promotion and rollback stages below are a design, not completed implementation.
 

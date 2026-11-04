@@ -1,8 +1,11 @@
 # API Implementation
-- Knowledge article url: https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/rest-api-implementation/
-- Author: Remzi Çavdar
-- AI disclosure: ChatGPT helped me draft this article. I reviewed and edited the content to my satisfaction, and take
-  full responsibility for the accuracy, completeness and usefulness of the content.
+- **Knowledge article url:** https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/rest-api-implementation/
+- **Author:** Remzi Çavdar
+- **AI disclosure:** I used OpenAI Codex to assist in drafting this document by analysing my codebase, identifying
+  relevant implementations, and comparing my work against the AUAS BoKSA knowledge article. Codex helped structure and
+  formulate the documentation based on these findings. I independently reviewed, verified, and edited the generated
+  content to ensure it accurately reflects my work and understanding. I take full responsibility for the accuracy,
+  completeness, and quality of this document.
 
 I implemented the quiz REST API with Ktor. The frontend consumes it, 
 and the shared [OpenAPI contract](../../../shared/openapi/currency-quiz.v1.yaml) describes its requests and responses.
