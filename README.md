@@ -438,10 +438,77 @@ These commands work in **PowerShell 7+ and Linux/Bash**. Generation and OpenAPI 
 
 ```sh
 ./gradlew test
+./gradlew check
 ./gradlew build
 ```
 
 Tests provide isolated credentials and temporary storage; no production environment variables are required.
+
+All tests use [Kotest](https://kotest.io/docs/framework/framework.html) `FunSpec` and Kotest assertions, running on the
+JUnit Platform through the `kotest` engine. [MockK](https://mockk.io/) supplies strict mocks for dependencies;
+`coEvery` and `coVerify` stub and verify suspending repository calls. Versions are pinned in
+[gradle/libs.versions.toml](gradle/libs.versions.toml). The Kotest IntelliJ plugin is optional for gutter run actions.
+
+Kotest provides the test definitions and its own engine; the JUnit Platform discovers and launches that engine on the JVM.
+The project uses Kotest's `kotest-runner-junit6` module, with the
+[JUnit 6.1.3 BOM](https://docs.junit.org/6.1.3/running-tests/build-support.html#gradle) aligning all JUnit modules,
+including the explicitly declared Platform launcher. The Gradle test task selects the `kotest` engine.
+
+- Unit tests cover configuration, dotenv loading, question validation, credentials/JWTs and browser-session logic.
+- Repository tests use temporary files to check real persistence, concurrency and failure atomicity.
+- `RoutingTest` uses Ktor's in-process test application and a fresh mocked repository for each case.
+- `ServerTest` and `BrowserSessionTest` exercise the application with real temporary storage;
+  `ContractTest` validates HTTP interactions against the shared OpenAPI contract.
+
+Create mutable fixtures and mocks inside each test or a factory called by that test. Kotest reuses a spec instance
+by default, so sharing mocks across tests would also share recorded calls. Use named `withTests` rows for boundary
+cases, direct suspend calls in Kotest tests, and a controlled `Clock` for expiry checks. Tests do not need real-time
+sleeps or retry assertions. Keep real persistence and HTTP regression tests alongside isolated unit tests.
+
+To run one spec or force a fresh execution, use these commands in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+./gradlew test --tests '*AuthServiceTest'
+./gradlew test --rerun
+```
+
+[JaCoCo](https://docs.gradle.org/current/userguide/jacoco_plugin.html) instruments the test JVM. Every `test` run
+generates an HTML coverage report at `build/reports/jacoco/test/html/index.html` and an XML report at
+`build/reports/jacoco/test/jacocoTestReport.xml`. The test-results report is `build/reports/tests/test/index.html`.
+Coverage combines all tests in the suite. OpenAPI-generated classes in `info.remzi.currencyquiz.contract` are excluded
+from coverage reports and verification; handwritten application code remains included.
+
+`check` and `build` enforce at least **90% line coverage and 80% branch coverage** across that application code.
+The thresholds and shared class filter are defined in [build.gradle.kts](build.gradle.kts). A filtered `test --tests`
+run produces partial coverage; run the full suite before verifying coverage. To generate reports explicitly or run
+only the coverage verification task, use these commands in **PowerShell 7+ and Linux/Bash**:
+
+```sh
+./gradlew jacocoTestReport
+./gradlew jacocoTestCoverageVerification
+```
+
+For a fresh full test run, coverage verification and HTML/XML reports in one command, use this in
+**PowerShell 7+ and Linux/Bash**:
+
+```sh
+./gradlew test --rerun check jacocoTestReport
+```
+
+Open the HTML coverage report in your browser. In **PowerShell 7+ on Windows**:
+
+```powershell
+Invoke-Item ./build/reports/jacoco/test/html/index.html
+```
+
+In **Linux/Bash** with a desktop session:
+
+```bash
+xdg-open ./build/reports/jacoco/test/html/index.html
+```
+
+You can also open `build/reports/jacoco/test/html/index.html` directly in a browser. Click a package, then a class,
+to inspect covered and missed lines and branches.
 
 The [build script](build.gradle.kts) registers OpenAPI Generator's `GenerateTask` and `ValidateTask` directly.
 The plugin declaration uses `apply false` to provide those task types without its deprecated `Configuration.setVisible` setup.
@@ -465,9 +532,13 @@ See the [Ktor JWT documentation](https://ktor.io/docs/server-jwt.html) and [requ
 
 ## Continuous integration
 
-The [Backend CI workflow](.github/workflows/ci.yml) runs on pushes, pull requests and manual Actions runs. 
+The [Backend CI workflow](.github/workflows/ci.yml) follows the frontend's trigger setup:
+pushes to `main` or `dev`, pull requests and manual Actions runs. Feature branches such as `unit-testing` run CI
+through their pull request, so a push to that branch does not also start a separate push run.
+Feature branches without a pull request can be checked locally or with a manual run.
+
 It initializes the pinned `shared/` submodule, uses Temurin Java 25 and Gradle's GitHub cache, 
-then validates OpenAPI → runs tests → builds the runnable JAR. 
+then validates OpenAPI → runs tests and verifies coverage with `check` → builds the runnable JAR.
 Its Linux runner makes `gradlew` executable because Git currently records it without the executable bit. 
 Tests use isolated credentials and temporary files; no production secrets are needed.
 
@@ -476,14 +547,22 @@ Run the same checks from the backend root in **PowerShell 7+ and Linux/Bash**:
 ```sh
 git submodule update --init --recursive
 ./gradlew openApiValidate
-./gradlew test
+./gradlew check
 ./gradlew shadowJar
 ```
 
 The JAR is written to `build/libs/currency-quiz-backend-all.jar`. The workflow uses `--no-daemon` for each Gradle 
-invocation and reuses dependency caches between runs. Actions are pinned to full commit IDs with release-version comments; 
-update the pin and comment together when upgrading. Repository permissions are read-only, 
+invocation and reuses dependency caches between runs. Actions use explicit release tags such as
+`actions/checkout@v7.0.1` and `actions/setup-java@v6.1.0`; update the version tag when upgrading.
+Repository permissions are read-only,
 and a newer run cancels an older run for the same workflow/ref.
+
+The workflow uploads test results and HTML/XML coverage reports as the `test-and-coverage-reports` artifact,
+including when a check fails. Reports are retained for 14 days. Docker image builds run the same `check` gate.
+
+To view coverage from a GitHub run, open **Actions → Backend CI → the run → Artifacts**, download
+`test-and-coverage-reports` and extract the ZIP. Open `reports/jacoco/test/html/index.html` inside the extracted folder.
+Keep the complete HTML report folder together so its stylesheet, images and source pages remain available.
 
 After committing and pushing the workflow, open **Actions → Backend CI** to inspect a run. 
 Manual runs become available from the default branch. 
