@@ -11,7 +11,7 @@ fun Application.module() {
     quizModule(settings, repository)
 }
 
-fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository, browserSessions: BrowserSessions = BrowserSessions(settings)) {
+fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository, tokens: JwtTokens = JwtTokens(settings)) {
     install(CallLogging) {
         // The custom format is plain text, so Jansi native console support is unnecessary.
         disableDefaultColors()
@@ -20,8 +20,10 @@ fun Application.quizModule(settings: ApiSettings, repository: QuestionRepository
     configureSerialization()
     configureStatusPages()
     configureRequestValidation()
-    configureSecurity(settings, browserSessions)
+    val browser = BrowserTokens(settings, tokens)
+    configureSecurity(tokens)
     configureRateLimiting()
     configureHttp(settings)
-    configureRouting(repository, AuthService(settings), browserSessions)
+    configureAuthRouting(AuthService(settings, tokens), tokens, browser)
+    configureRouting(repository, browser)
 }

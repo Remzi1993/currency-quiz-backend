@@ -161,6 +161,7 @@ class ServerTest : FunSpec() {
                 )
                 for (token in invalidTokens) client.createQuestion(token).status shouldBe HttpStatusCode.Unauthorized
                 client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
+                client.createQuestion(signedToken()).status shouldBe HttpStatusCode.Created
             }
         }
 
@@ -444,7 +445,7 @@ class ServerTest : FunSpec() {
         test("admin credentials and signing key cannot silently use insecure defaults") {
             val required = listOf(
                 "security.adminUsername" to ADMIN_USERNAME,
-                "security.adminPassword" to ADMIN_PASSWORD,
+                "security.adminPasswordHash" to testPasswordHash(ADMIN_PASSWORD),
                 "security.jwtSecret" to JWT_SECRET,
             )
             for (missing in required) {
@@ -528,7 +529,7 @@ class ServerTest : FunSpec() {
                     override suspend fun update(id: String, request: UpdateQuestionRequest): Question? = error(internalDetail)
                     override suspend fun delete(id: String): Boolean = error(internalDetail)
                 }
-                application { quizModule(ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET), repository) }
+                application { quizModule(ApiSettings(ADMIN_USERNAME, testPasswordHash(ADMIN_PASSWORD), JWT_SECRET), repository) }
                 val response = client.get("/api/v1/questions")
                 response.status shouldBe HttpStatusCode.InternalServerError
                 response.contentType()?.withoutParameters() shouldBe ContentType.Application.Json
@@ -570,7 +571,7 @@ class ServerTest : FunSpec() {
             environment {
                 config = MapApplicationConfig(
                     "security.adminUsername" to ADMIN_USERNAME,
-                    "security.adminPassword" to ADMIN_PASSWORD,
+                    "security.adminPasswordHash" to testPasswordHash(ADMIN_PASSWORD),
                     "security.jwtSecret" to JWT_SECRET,
                     "storage.questionsFile" to storage.toString(),
                     "cors.allowedOrigins" to allowedOrigins,
@@ -615,11 +616,13 @@ class ServerTest : FunSpec() {
         secret: String = JWT_SECRET,
         subject: String = ADMIN_USERNAME,
         role: String = "admin",
-        issuer: String = "currencyquiz-api",
-        audience: String = "currencyquiz-admin",
+        issuer: String = "currency-quiz-api",
+        audience: String = "currency-quiz-admin",
         expiresAt: Instant? = Instant.now().plusSeconds(120),
     ): String {
-        val token = JWT.create().withSubject(subject).withClaim("role", role)
+        val token = JWT.create().withHeader(mapOf("typ" to "at+jwt"))
+            .withSubject(subject).withClaim("role", role)
+            .withClaim("token_use", "access").withClaim("csrf", "c".repeat(43))
             .withIssuer(issuer).withAudience(audience)
             .withIssuedAt(Date.from(Instant.now().minusSeconds(120)))
         if (expiresAt != null) token.withExpiresAt(Date.from(expiresAt))

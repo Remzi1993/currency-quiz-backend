@@ -39,10 +39,11 @@ The shared npm package uses [OpenAPI Generator and TypeScript](../../../shared/s
 The frontend imports named types with `import type` from its own shared submodule. These provide compile-time checks; 
 the frontend separately validates incoming JSON. Request validation and authorisation remain backend responsibilities.
 
-Bearer JWT verification does not require a token store. The browser admin flow uses opaque HttpOnly access/refresh cookies 
-and a bounded server-side session registry for inactivity expiry, rotation and revocation. 
-These are separate authentication choices in the same contract. Question content is stored in a JSON file; 
-browser session state is process-local and clears on restart.
+Bearer clients and browsers both use stateless JWT verification. Browsers receive access and refresh JWTs in HttpOnly
+cookies, and cookie writes additionally require a trusted Origin and JWT-bound CSRF header. Access defaults to five
+minutes; refresh to ten minutes from login. Refresh renews access within the original refresh deadline. No authentication
+session or token registry is stored. Logout clears cookies, but copied JWTs remain valid until expiry. Question content
+is stored in a JSON file.
 
 ## Versions and updates
 

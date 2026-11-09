@@ -6,7 +6,7 @@ import java.net.URI
 /** Configuration is deliberately not a data class: its string representation must not expose secrets. */
 class ApiSettings(
     val adminUsername: String,
-    val adminPassword: String,
+    val adminPasswordHash: String,
     val jwtSecret: String,
     val jwtIssuer: String = "currency-quiz-api",
     val jwtAudience: String = "currency-quiz-admin",
@@ -16,24 +16,24 @@ class ApiSettings(
     val adminAllowedOrigins: List<String> = emptyList(),
     val authCookieSecure: Boolean = true,
     val authCookieSameSite: String = "Strict",
-    val sessionIdleSeconds: Long = 900,
-    val sessionAbsoluteSeconds: Long = 1800,
+    val refreshTokenTtlSeconds: Long = 600,
 ) {
     init {
         require(adminUsername.isNotBlank() && adminUsername.length <= 100) {
             "security.adminUsername must contain between 1 and 100 characters"
         }
-        require(adminPassword.isNotBlank() && adminPassword.length in 12..1024) {
-            "security.adminPassword must contain between 12 and 1024 characters"
+        require(PasswordHash.isValid(adminPasswordHash)) {
+            "security.adminPasswordHash must be a bcrypt hash with cost between 10 and 16"
         }
         require(jwtSecret.isNotBlank() && jwtSecret.toByteArray(Charsets.UTF_8).size >= 32) {
             "security.jwtSecret must contain at least 32 UTF-8 bytes"
         }
         require(jwtIssuer.isNotBlank()) { "security.jwtIssuer must not be blank" }
         require(jwtAudience.isNotBlank()) { "security.jwtAudience must not be blank" }
-        require(tokenTtlSeconds in 1..300) { "security.tokenTtlSeconds must be between 1 and 300" }
-        require(sessionIdleSeconds in tokenTtlSeconds..900) { "security.sessionIdleSeconds must be at least the access lifetime and at most 900" }
-        require(sessionAbsoluteSeconds in sessionIdleSeconds..1800) { "security.sessionAbsoluteSeconds must be at least the idle lifetime and at most 1800" }
+        require(tokenTtlSeconds in 1..Int.MAX_VALUE.toLong()) { "security.tokenTtlSeconds must be between 1 and 2147483647" }
+        require(refreshTokenTtlSeconds in tokenTtlSeconds..Int.MAX_VALUE.toLong()) {
+            "security.refreshTokenTtlSeconds must be at least the access lifetime and at most 2147483647"
+        }
         require(questionsFile.isNotBlank()) { "storage.questionsFile must not be blank" }
         allowedOrigins.forEach(::validateOrigin)
         adminAllowedOrigins.forEach { origin ->
@@ -72,7 +72,7 @@ class ApiSettings(
 
             return ApiSettings(
                 adminUsername = required("security.adminUsername"),
-                adminPassword = required("security.adminPassword"),
+                adminPasswordHash = required("security.adminPasswordHash"),
                 jwtSecret = required("security.jwtSecret"),
                 jwtIssuer = optional("security.jwtIssuer", "currency-quiz-api"),
                 jwtAudience = optional("security.jwtAudience", "currency-quiz-admin"),
@@ -82,10 +82,8 @@ class ApiSettings(
                 adminAllowedOrigins = origins("security.adminAllowedOrigins"),
                 authCookieSecure = cookieSecure,
                 authCookieSameSite = optional("security.authCookieSameSite", "Strict"),
-                sessionIdleSeconds = optional("security.sessionIdleSeconds", "900").toLongOrNull()
-                    ?: error("security.sessionIdleSeconds must be an integer"),
-                sessionAbsoluteSeconds = optional("security.sessionAbsoluteSeconds", "1800").toLongOrNull()
-                    ?: error("security.sessionAbsoluteSeconds must be an integer"),
+                refreshTokenTtlSeconds = optional("security.refreshTokenTtlSeconds", "600").toLongOrNull()
+                    ?: error("security.refreshTokenTtlSeconds must be an integer"),
             )
         }
 

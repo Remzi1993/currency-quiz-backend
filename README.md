@@ -110,7 +110,36 @@ openssl rand -base64 48
 
 Open `.env` in your editor and paste the generated value into `JWT_SECRET`.
 
-Set `ADMIN_USERNAME`, a unique `ADMIN_PASSWORD` of at least 12 characters, and `JWT_SECRET`. 
+Set `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH`, and `JWT_SECRET`. Generate a salted bcrypt hash from a unique password
+of at least 12 characters and no more than 72 UTF-8 bytes. Keep the password itself out of `.env`.
+The `hashAdminPassword` Gradle task uses the same bcrypt library as login verification, with cost 12 and a random salt.
+Its standard input is the password; its output includes the hash to copy into `ADMIN_PASSWORD_HASH`.
+
+In **PowerShell 7+**:
+
+```powershell
+$adminPassword = Read-Host "Admin password" -MaskInput
+$adminPassword | ./gradlew.bat --quiet hashAdminPassword --console=plain
+Remove-Variable adminPassword
+```
+
+In **Linux/Bash**:
+
+```bash
+read -r -s -p 'Admin password: ' adminPassword
+printf '\n'
+printf '%s\n' "$adminPassword" | ./gradlew --quiet hashAdminPassword --console=plain
+unset adminPassword
+```
+
+Paste the generated hash into `.env` inside **single quotes**, for example `ADMIN_PASSWORD_HASH='$2a$12$...'`.
+Docker Compose interpolates dollar expressions in unquoted and double-quoted values; single quotes preserve the hash
+literally. The native dotenv loader accepts the same form. See [Docker's environment-file syntax](https://docs.docker.com/compose/how-tos/environment-variables/variable-interpolation/#env-file-syntax).
+When entering the hash directly in Render's environment dashboard, paste the hash itself without surrounding quotes.
+
+The hash includes its algorithm, work factor and salt. It can verify a password without storing the original;
+the work factor makes offline guessing more expensive. Do not pass passwords as command-line arguments.
+
 The template sets `CORS_ALLOWED_ORIGINS=*` for public developer access. 
 Cookie-based administration separately requires exact `ADMIN_CORS_ALLOWED_ORIGINS` entries. 
 For a frontend at `http://localhost:5173`, keep that entry and set `AUTH_COOKIE_SECURE=false` for local HTTP only. 
@@ -184,13 +213,12 @@ Changing it invalidates previously issued tokens.
 |----------------------------------|----------|----------------------------------------------------------------------------------------------------------------------------|
 | `PORT`                           | No       | `8080`                                                                                                                     |
 | `ADMIN_USERNAME`                 | Yes      | Nonblank; at most 100 characters                                                                                           |
-| `ADMIN_PASSWORD`                 | Yes      | 12–1024 characters; must not be blank                                                                                      |
+| `ADMIN_PASSWORD_HASH`            | Yes      | Salted bcrypt hash (`2a`, `2b` or `2y`), cost 10–16. Generated passwords: at least 12 characters, at most 72 UTF-8 bytes. |
 | `JWT_SECRET`                     | Yes      | At least 32 UTF-8 bytes; use a random secret                                                                               |
 | `JWT_ISSUER`                     | No       | `currencyquiz-api`                                                                                                         |
 | `JWT_AUDIENCE`                   | No       | `currencyquiz-admin`                                                                                                       |
-| `JWT_TOKEN_TTL_SECONDS`          | No       | `300`; 1–300 seconds for bearer tokens and browser access cookies                                                          |
-| `ADMIN_SESSION_IDLE_SECONDS`     | No       | `900`; at least the access lifetime and at most 900 seconds                                                                |
-| `ADMIN_SESSION_ABSOLUTE_SECONDS` | No       | `1800`; at least the idle lifetime and at most 1800 seconds                                                                |
+| `JWT_TOKEN_TTL_SECONDS`          | No       | `300`; positive integer seconds, at most 2147483647, for access JWTs                                                      |
+| `JWT_REFRESH_TOKEN_TTL_SECONDS`  | No       | `600`; at least the access lifetime, at most 2147483647 seconds, measured from login                                      |
 | `ADMIN_CORS_ALLOWED_ORIGINS`     | No       | Empty default; explicit comma-separated frontend origins. `*` is rejected.                                                 |
 | `AUTH_COOKIE_SECURE`             | No       | `true`; set `false` only for local HTTP development                                                                        |
 | `AUTH_COOKIE_SAME_SITE`          | No       | `Strict`; supports `Lax` or `None`, with `None` requiring Secure                                                           |
@@ -213,7 +241,7 @@ partial wildcards such as `*/` and `https://*.example.com` are not supported.
 [ApiSettings.kt](src/main/kotlin/ApiSettings.kt) validates both origin lists. [Http.kt](src/main/kotlin/Http.kt) sends credentialed CORS only to exact 
 `ADMIN_CORS_ALLOWED_ORIGINS` entries. Other permitted public origins receive no credential permission; a public `*` 
 never enables cookie administration. Browser-session routes reject untrusted origins even when public CORS is open. 
-Every cookie-authenticated write additionally requires the session-bound `X-CSRF-Token` header. 
+Every cookie-authenticated write additionally requires the JWT-bound `X-CSRF-Token` header.
 CORS does not replace authentication or CSRF checks.
 
 After changing `.env`, restart a native server. For Docker, rerun the documented `docker compose up -d --build --wait` 
@@ -232,9 +260,8 @@ All request bodies use `Content-Type: application/json`.
 | `POST`   | `/api/v1/auth/login`             | Admin credentials                                | `200`: JWT access token                                       |
 | `POST`   | `/api/v1/auth/session`           | Admin credentials + trusted Origin               | `200`: metadata and HttpOnly access/refresh cookies           |
 | `GET`    | `/api/v1/auth/session`           | Access or current refresh cookie                 | `200`: metadata, without extending expiry                     |
-| `POST`   | `/api/v1/auth/session/refresh`   | Refresh cookie + CSRF + trusted Origin           | `200`: rotated cookies; deadlines stay fixed                  |
-| `POST`   | `/api/v1/auth/session/activity`  | Access cookie + CSRF + trusted Origin            | `200`: updates idle deadline after user activity              |
-| `DELETE` | `/api/v1/auth/session`           | Access or refresh cookie + CSRF + trusted Origin | `204`: revoke family and clear both cookies                   |
+| `POST`   | `/api/v1/auth/session/refresh`   | Refresh cookie + CSRF + trusted Origin           | `200`: new access JWT; refresh deadline stays fixed            |
+| `DELETE` | `/api/v1/auth/session`           | Access or refresh cookie + CSRF + trusted Origin | `204`: clear both cookies                                      |
 | `POST`   | `/api/v1/questions`              | JWT or access cookie + CSRF                      | `201`: created question; `Location` identifies its public URL |
 | `PATCH`  | `/api/v1/questions/{id}`         | JWT or access cookie + CSRF                      | `200`: updated question                                       |
 | `DELETE` | `/api/v1/questions/{id}`         | JWT or access cookie + CSRF                      | `204`: deleted, without a response body                       |
@@ -242,26 +269,37 @@ All request bodies use `Content-Type: application/json`.
 Management responses include `correctAnswer`. Send the token as `Authorization: Bearer <accessToken>` when creating, 
 editing, or deleting a question. Tokens expire after the configured lifetime; log in again to obtain a new one.
 
-### Browser authentication and session policy
+### Stateless JWT browser authentication
 
-The Vue admin interface uses opaque HttpOnly cookies instead of storing JWTs in JavaScript-accessible storage. Login, 
-reads, rotation and activity return only `{ username, expiresIn, accessExpiresIn, absoluteExpiresIn, csrfToken }`; 
-lifetimes are in seconds. Both credentials are host-only, HttpOnly, Secure by default, and `SameSite=Strict`. 
-Access is scoped to `/api/v1`; refresh to `/api/v1/auth/session`.
+Browser login sets signed access and refresh JWTs in host-only HttpOnly cookies, with Secure enabled by default and
+`SameSite=Strict`. Access is scoped to `/api/v1`; refresh to `/api/v1/auth/session`. The backend verifies each JWT's
+signature, issuer, audience, subject, role, purpose, issue time and expiry. It stores no authentication sessions,
+token registry, activity history or client IP records for authentication. The URL contains `session` for frontend
+compatibility; it does not imply a server-side session.
 
-Access lasts at most **5 minutes**. The server requires a new login after **15 minutes without activity**, or 
-**30 minutes overall**, whichever comes first. Refresh rotates both credentials and rejects reuse by revoking the session family. 
-Neither reads nor refresh reset inactivity; explicit user activity and valid question changes can reset it.
-No activity can move the absolute deadline. The frontend renews only before user-requested operations and serializes rotation/login/logout across tabs. 
-Failed writes and refreshes are never automatically retried.
+Login, metadata reads and refresh return only `{ username, expiresIn, accessExpiresIn, csrfToken }`.
+`expiresIn` is the refresh time remaining, or access time when only access is available. Lifetimes are in seconds.
+Keep CSRF in memory and use `credentials: 'include'`; keep JWTs out of JavaScript-accessible storage.
+
+Access defaults to **5 minutes** and refresh to **10 minutes from login**, adjustable using the two JWT lifetime
+environment variables. Refresh renews access without changing the refresh JWT or its deadline. Renewed access cannot
+outlive refresh. Reads do not issue tokens. There is no idle timer or activity endpoint; log in again after refresh expires.
+The refresh JWT is never accepted for question management.
 
 Use the frontend's same-origin `/api` proxy to `https://currencyquiz-backend.onrender.com`; leave `VITE_API_BASE_URL` empty. 
 Browser cookies then belong to the frontend host. Render still needs that exact frontend origin in `ADMIN_CORS_ALLOWED_ORIGINS`. 
 Direct cross-site cookies require `SameSite=None; Secure` and may be blocked by browser policies.
 
-The bounded in-memory store holds at most 1,000 sessions and 128 spent refresh digests per family. 
-Logout revokes the family immediately. A restart or Render free-plan spin-down clears browser sessions. 
-Multiple instances require a shared atomic store. Bearer JWTs remain separate and have no individual revocation. 
+Logout clears both cookies. Without server-side state, copied JWTs remain valid until expiry and refresh reuse cannot
+be detected. Changing the signing key invalidates all JWTs. With the same key and configuration, tokens survive
+backend restarts and work across instances. Rate limiting separately uses transient connection-IP buckets; request
+logs contain the method, path and status, without credentials or IPs.
+
+Migration: replace `ADMIN_PASSWORD` with `ADMIN_PASSWORD_HASH`, remove `ADMIN_SESSION_IDLE_SECONDS` and
+`ADMIN_SESSION_ABSOLUTE_SECONDS`, and set `JWT_REFRESH_TOKEN_TTL_SECONDS=600`. Browser clients must stop calling
+`/auth/session/activity`, remove `absoluteExpiresIn`, and use the new meaning of `expiresIn`. Adopt the new shared
+contract revision in the frontend before deployment; frontend changes are outside this backend checkout.
+
 The design, tests, limitations and rationale are documented in [Secure coding practices](docs/designing-and-realising/deepening/secure-coding-practices.md).
 
 ### Example flow with PowerShell 7+
@@ -376,7 +414,7 @@ The `details` array is empty when there are no additional validation reasons. Th
 | `429`  | Rate limit exceeded; respect `Retry-After`                                              |
 | `500`  | Unexpected server error; internal details are logged and are not returned               |
 
-Browser and bearer login share 5 attempts per minute per client IP. Refresh and activity share a separate 30 requests 
+Browser and bearer login share 5 attempts per minute per client IP. Refresh has a separate 30 requests
 per minute per client IP. Answer submission allows 30 requests per minute per client IP across question IDs. 
 Limits are process-local and reset on restart.
 
@@ -418,9 +456,9 @@ and redeploy the service to allow browser clients from any origin. Use explicit 
 Changing the local `.env` or `.env.example` does not update Render's environment.
 
 For browser administration also set `ADMIN_CORS_ALLOWED_ORIGINS` to the exact deployed frontend origin, 
-`AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAME_SITE=Strict`, and `JWT_TOKEN_TTL_SECONDS=300`. Keep `ADMIN_SESSION_IDLE_SECONDS=900` 
-and `ADMIN_SESSION_ABSOLUTE_SECONDS=1800`, or shorten them. An older `JWT_TOKEN_TTL_SECONDS=3600` now fails startup validation; 
-update it before deploying this version. These environment changes and a live deployment must be applied on Render separately.
+`AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAME_SITE=Strict`, `JWT_TOKEN_TTL_SECONDS=300`, and
+`JWT_REFRESH_TOKEN_TTL_SECONDS=600`. Replace `ADMIN_PASSWORD` with the generated `ADMIN_PASSWORD_HASH` and remove
+the old idle/absolute session variables. These environment changes and a live deployment must be applied on Render separately.
 
 Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP health-check path to `/`. 
 See [Render's port requirements](https://render.com/docs/web-services#port-binding) and [health-check settings](https://render.com/docs/health-checks).
@@ -454,7 +492,7 @@ The project uses Kotest's `kotest-runner-junit6` module, with the
 [JUnit 6.1.3 BOM](https://docs.junit.org/6.1.3/running-tests/build-support.html#gradle) aligning all JUnit modules,
 including the explicitly declared Platform launcher. The Gradle test task selects the `kotest` engine.
 
-- Unit tests cover configuration, dotenv loading, question validation, credentials/JWTs and browser-session logic.
+- Unit tests cover configuration, dotenv loading, question validation, password hashes, JWT claims and browser cookie policy.
 - Repository tests use temporary files to check real persistence, concurrency and failure atomicity.
 - `RoutingTest` uses Ktor's in-process test application and a fresh mocked repository for each case.
 - `ServerTest` and `BrowserSessionTest` exercise the application with real temporary storage;
