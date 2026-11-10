@@ -1,20 +1,25 @@
 # Secure Coding Practices
+
 - **Knowledge article url:** https://boksa.hbo-ict-hva.nl/profiles/full-stack-developer/design-and-realise/secure-coding-practices/
 - **Author:** Remzi Çavdar
-- **AI disclosure:** I used OpenAI Codex to assist in drafting this document by analysing my codebase, identifying
-  relevant implementations, and comparing my work against the AUAS BoKSA knowledge article. Codex helped structure and
-  formulate the documentation based on these findings. I independently reviewed, verified, and edited the generated
-  content to ensure it accurately reflects my work and understanding. I take full responsibility for the accuracy,
-  completeness, and quality of this document.
+- **AI disclosure:** I used OpenAI Codex to help analyse the current code and tests, check security references,
+  and update the explanations and evidence below. I remain responsible for reviewing the content and explaining
+  these decisions myself.
 
 ## My goal and choices
 
-Players can answer questions without an account. Only the configured administrator may change content. I use JWTs
-for authentication and verify the admin role for authorization. The backend records no authentication sessions,
-token registry or browser activity. This reduces stored personal data and keeps the authentication code small.
+Currency Quiz is my personal side project for school, and I am its only developer. Players can answer questions
+without an account; only the configured administrator may change content. Avoiding player registration removes
+the need for profiles, password recovery and stored player histories that the current quiz does not require.
 
-Browsers keep access and refresh JWTs in HttpOnly cookies. API clients receive an access JWT in JSON. Both use the
-same signature and claims validation. There is one administrator role; registration and a second role are not implemented.
+I use JWTs for authentication and verify the configured subject and admin role for authorization. The backend
+maintains no registry of authentication sessions, tokens or activity. This avoids maintaining a session store, with
+the revocation limits described below. Routine request logs and transient IP-based rate limits still exist.
+
+Browsers use access and refresh JWTs in HttpOnly cookies. Bearer API clients receive an access JWT in JSON.
+Both transports use the same signature policy, with distinct checks for access and refresh purposes. There is
+one configured administrator and no registration flow. The
+[architecture decisions](architecture-and-design-patterns.md) explain the alternatives and maintenance tradeoffs.
 
 ## Security in the development process
 
@@ -30,82 +35,173 @@ A peer review, independent penetration test and completed OWASP vulnerability la
 
 ## What the implementation shows
 
-| Concern | Current measure | Code evidence |
+| Concern | Current measure and why | Code evidence |
 |---|---|---|
 | Unauthorised changes | Verified access JWT with the configured subject and admin role. Refresh JWTs cannot authorize question changes. | [JwtTokens.kt](../../../src/main/kotlin/JwtTokens.kt), [Security.kt](../../../src/main/kotlin/Security.kt) |
-| Password storage | Salted bcrypt hash in configuration; verification never needs a configured plaintext password. | [PasswordHash.kt](../../../src/main/kotlin/PasswordHash.kt), [ApiSettings.kt](../../../src/main/kotlin/ApiSettings.kt) |
+| Password storage | Salted bcrypt verifier in configuration replaces the plaintext password; its work factor increases the cost of guessing. | [PasswordHash.kt](../../../src/main/kotlin/PasswordHash.kt), [ApiSettings.kt](../../../src/main/kotlin/ApiSettings.kt) |
 | Cookie request forgery | Exact Origin allowlist and a random nonce bound to signed JWT claims, compared with the CSRF header in constant time. | [BrowserTokens.kt](../../../src/main/kotlin/BrowserTokens.kt) |
-| Invalid input | Typed JSON, length limits, unique options and validation after merging PATCH fields. Unknown fields are rejected. | [RequestValidation.kt](../../../src/main/kotlin/RequestValidation.kt), [Serialization.kt](../../../src/main/kotlin/Serialization.kt) |
-| Secret exposure | Configuration has no secret-bearing string representation. Dotenv errors omit secret-bearing lines. Credentials are absent from request logs. | [LocalEnvironment.kt](../../../src/main/kotlin/LocalEnvironment.kt), [Application.kt](../../../src/main/kotlin/Application.kt) |
+| Invalid input | Strict JSON, bounded fields and validation after merging PATCH fields prevent invalid persisted questions. Generated DTOs alone do not enforce those rules. | [RequestValidation.kt](../../../src/main/kotlin/RequestValidation.kt), [Serialization.kt](../../../src/main/kotlin/Serialization.kt) |
+| Secret exposure | Settings and issued-token objects avoid generated string representations containing secrets. Dotenv parser errors omit input lines and causes; routine request logs omit credentials. | [ApiSettings.kt](../../../src/main/kotlin/ApiSettings.kt), [JwtTokens.kt](../../../src/main/kotlin/JwtTokens.kt), [LocalEnvironment.kt](../../../src/main/kotlin/LocalEnvironment.kt), [Application.kt](../../../src/main/kotlin/Application.kt) |
 | Excessive public data | Public questions omit correct answers; answer checking happens on the server. | [Models.kt](../../../src/main/kotlin/Models.kt) |
 | Abuse and error leakage | Process-local connection-IP limits on login, refresh and answers. Generic client errors omit exception details. | [RateLimiting.kt](../../../src/main/kotlin/RateLimiting.kt), [StatusPages.kt](../../../src/main/kotlin/StatusPages.kt) |
+| Runtime privileges and packaged secrets | The container runs as a dedicated non-root user; the Docker context excludes local environment files and mutable question data. | [Dockerfile](../../../Dockerfile), [.dockerignore](../../../.dockerignore) |
 
-Question content uses JSON-file storage, so this application has no SQL queries. Parameter binding must be used if
-SQL storage is added. CORS does not grant admin permission; knowing a UUID does not permit editing it.
+## Passwords and configuration
+
+`PasswordHash` uses a dedicated bcrypt library. The hash utility generates a fresh random salt with cost 12 and
+requires at least 12 characters, some non-whitespace content, and at most 72 UTF-8 bytes. Verification rejects
+longer passwords rather than silently accepting a matching 72-byte prefix. Startup accepts supported bcrypt
+hashes with costs from 10 through 16 and requires a signing secret of at least 32 UTF-8 bytes. The byte-length check
+does not establish randomness; the signing secret must be generated securely, as shown in the
+[configuration instructions](../../../README.md#configuration).
+
+The current implementation uses bcrypt. [OWASP's password-storage guidance](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+explains salts, work factors and bcrypt's input limit, and recommends Argon2id for new systems. An algorithm change
+would require a separate compatibility and migration decision.
+
+`AuthService` compares credentials exactly, without trimming or changing case. It checks the bcrypt verifier even
+for an unknown username and returns the same invalid-credentials response. The SHA-256 digest in this class is
+used for username comparison; the password verifier is bcrypt. These controls reduce obvious differences between
+failed credential checks, without establishing that every request has identical timing.
+
+Only the documented application keys are loaded from `.env`, and existing OS environment variables and JVM
+properties take precedence. Single quotes around `ADMIN_PASSWORD_HASH` preserve its dollar separators in Compose;
+the native loader removes those surrounding quotes only for that setting. Malformed dotenv input fails before
+applying values and omits the parser's secret-bearing line and cause. Local secrets belong in `.env` or the hosting
+environment, outside Git and container images. The [README](../../../README.md#configuration) documents hash generation
+through standard input so the password need not appear in command-line arguments.
 
 ## Stateless JWTs in HttpOnly cookies
 
-1. POST /api/v1/auth/session verifies JSON credentials against the salted bcrypt hash, a trusted Origin and the shared login rate limit.
-2. It sets two host-only cookies with HttpOnly, Secure and SameSite=Strict defaults: currency_quiz_admin on /api/v1 and currency_quiz_admin_refresh on /api/v1/auth/session. The refresh cookie is not normally sent to question routes.
-3. Browser requests use credentials: include. GET /api/v1/auth/session returns only username, expiresIn, accessExpiresIn and csrfToken. These values stay in memory; neither authentication JWT appears in JSON.
-4. POST /api/v1/auth/session/refresh verifies the refresh JWT, Origin and CSRF. It replaces both JWT cookies, preserving the original sign-in deadline and CSRF nonce.
-5. Question writes and logout require an access or applicable refresh JWT, trusted Origin and matching X-CSRF-Token. DELETE /api/v1/auth/session clears both original cookie scopes.
+Browser requests use `credentials: include`. Despite the `/session` route name, the backend stores no session record.
 
-Access defaults to 300 seconds through JWT_TOKEN_TTL_SECONDS. Each refresh JWT defaults to 600 seconds through
-JWT_REFRESH_TOKEN_TTL_SECONDS. JWT_ABSOLUTE_TTL_SECONDS sets the original sign-in limit, defaulting to 86400 seconds
-(24 hours). All three accept positive integer seconds up to 2147483647, with access lifetime no longer than refresh
-and refresh no longer than the absolute limit. Increasing these values deliberately increases the exposure window.
+| Operation | Credential and checks | Result |
+|---|---|---|
+| `POST /api/v1/auth/login` | Username/password and the shared login rate limit. | Access JWT in JSON for bearer clients; no browser cookies. |
+| `POST /api/v1/auth/session` | Username/password, an exact trusted Origin and the same login limit. | Both JWT cookies and four metadata fields. |
+| `GET /api/v1/auth/session` | A valid refresh or access cookie. Origin may be absent; an explicit untrusted Origin is rejected. | Metadata only; no tokens are issued and no expiry is extended. |
+| `POST /api/v1/auth/session/refresh` | Valid refresh cookie, trusted Origin, matching `X-CSRF-Token` and the refresh rate limit. | Both JWT cookies are reissued within the original login deadline. |
+| Question create, update and delete | Valid access JWT. Cookie authentication also requires trusted Origin and matching CSRF header. | Authorized question mutation. A refresh JWT cannot authorize it. |
+| `DELETE /api/v1/auth/session` | Valid refresh cookie, falling back to valid access, plus trusted Origin and matching CSRF header. | Both original cookie scopes are cleared. |
 
-Both JWTs carry signed auth_time and absolute_exp claims. Login establishes these values once; renewal copies them
-unchanged. Each new expiry is the earlier of its configured lifetime and the original absolute deadline. A refresh
-with 20 seconds left therefore issues both JWTs with only 20 seconds remaining. A fresh sign-in is required at the
-absolute deadline, or earlier if the current refresh JWT expires without renewal. There is no activity endpoint or
-separate inactivity timer. Reading metadata issues no tokens and extends no expiry.
+The cookies are host-only and HttpOnly, with Secure and SameSite=Strict defaults. `currency_quiz_admin` uses
+`/api/v1`; `currency_quiz_admin_refresh` uses `/api/v1/auth/session`, so the browser does not normally send the refresh
+cookie to question routes. This narrows routine exposure of the more powerful renewal credential.
 
-JWT verification fixes the signing algorithm and checks issuer, audience, configured subject, admin role, token
-purpose, issue time, expiry and original login deadline. Login claims must be integers in the allowed order and
-within the configured absolute lifetime; older JWTs without these claims require a fresh sign-in. Access and refresh
-have separate purposes. The CSRF nonce is generated with
-SecureRandom and bound to signed claims, so a header cannot substitute for an authentication JWT.
+The browser metadata fields are `username`, `expiresIn`, `accessExpiresIn` and `csrfToken`; neither JWT is returned
+in the browser JSON response. `expiresIn` is the remaining verified refresh lifetime when available, otherwise the
+access lifetime. It is not the time remaining until the original absolute deadline. `accessExpiresIn` is zero when
+there is no valid matching access credential. Metadata can therefore remain available after access expiry while
+the refresh cookie is still valid.
+
+### Rolling renewal and the absolute deadline
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `JWT_TOKEN_TTL_SECONDS` | 300 seconds | Short access lifetime limits use of a copied access credential. |
+| `JWT_REFRESH_TOKEN_TTL_SECONDS` | 600 seconds from issuance | Permit continued work through explicit renewal before the current refresh expires. |
+| `JWT_ABSOLUTE_TTL_SECONDS` | 86,400 seconds (24 hours) | Require a fresh login after a bounded period from original sign-in. |
+
+All three accept positive integer seconds up to 2,147,483,647, with access lifetime no longer than refresh and
+refresh no longer than the absolute limit. Longer configured lifetimes increase the exposure window.
+
+Both JWTs carry signed `auth_time` and `absolute_exp` claims. Login establishes them once; successful renewal copies
+them unchanged along with the CSRF nonce. Each new expiry is the earlier of issuance time plus its configured
+lifetime and the original absolute deadline. A refresh with only 20 seconds of its own lifetime left can still
+receive fresh 300/600-second tokens when the absolute deadline is sufficiently far away. With the default lifetimes,
+when only 20 seconds remain before that absolute deadline, both new tokens expire in 20 seconds.
+
+A fresh sign-in is required at the absolute deadline, or earlier if the current refresh JWT expires without renewal.
+Ordinary requests and metadata reads do not refresh credentials. There is no activity endpoint or separate
+inactivity timer, so making requests alone does not keep a login alive.
+
+Verification fixes HMAC-SHA256 and checks issuer, audience, configured subject, admin role, issue time, expiry,
+token purpose and original login deadline. Access requires `typ=at+jwt` and `token_use=access`; refresh requires
+`typ=refresh+jwt` and `token_use=refresh`. Login-time claims must be integers in the allowed order and within the
+configured absolute lifetime; malformed or older JWTs without them require a fresh sign-in. Tokens are rejected
+at their expiry boundary. Issuance uses one clock snapshot per pair, and renewal rechecks expiry during handling.
+
+The CSRF nonce uses 32 random bytes from `SecureRandom` and is bound to the signed claims. Possession of that value
+alone cannot authenticate a request. Signed JWT payloads remain readable to anyone holding them, so they contain
+the admin identity and policy claims rather than passwords or signing secrets.
 
 ### Limits of stateless authentication
 
 Logout removes browser cookies; it cannot invalidate a copied JWT. A refresh JWT can be reused until its own
 expiry. There is no single-use refresh enforcement, replay detection or individual token revocation. Reissuing a JWT
-would not invalidate its predecessor. These are explicit limits of removing server-side authentication state;
+does not invalidate its predecessor. These are explicit limits of removing server-side authentication state;
 [OWASP's JWT guidance](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html) discusses revocation,
 and [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14.2) describes stronger refresh-token replay defenses
 that require additional controls. This login API is not an OAuth authorization server.
 
 A copied refresh JWT plus its CSRF value can renew both credentials before that refresh expires, then continue using
 the replacements until the original absolute deadline. Neither renewed JWT can outlive that deadline. Replacement
-alone does not provide single-use enforcement. Rotating the signing key invalidates all JWTs. With the same signing key and configuration,
-JWTs remain valid across restarts and instances without a shared session store.
+alone does not provide single-use enforcement. Rotating the signing key invalidates all JWTs. With the same signing
+key and configuration, JWTs remain valid across restarts and instances without a shared session store. Question
+storage and rate limiting still support only one backend process; stateless authentication alone does not enable replicas.
 
-BrowserSessions previously held credential digests, CSRF values and timestamps, without client IPs. That registry has
-been removed. The remaining rate limiter uses connection IPs as transient process-local keys. Request logs contain
-method, path and status, without IPs, passwords or JWTs. Hosting and reverse-proxy logs need their own retention review.
+The previous `BrowserSessions` registry of credential digests, CSRF values and timestamps has been removed. The
+remaining rate limiter uses connection IPs as transient process-local keys. Routine request logs contain method,
+path and status, excluding query strings, bodies, credential headers and IP addresses. Unexpected exception causes
+are logged separately, so internal logs still need access controls and retention review. Hosting and reverse-proxy
+logs also need their own review.
 
 ### CSRF, CORS and XSS
 
-Cookies are attached automatically by browsers. HttpOnly prevents scripts from reading their values; it does not
-prevent scripts from sending authenticated requests. Cookie writes therefore require exactly one matching CSRF
+Cookies are attached automatically by browsers. HttpOnly prevents scripts from directly reading their values; it does not
+prevent scripts from sending authenticated requests. Cookie-authenticated changes therefore require exactly one matching CSRF
 header and an exact trusted Origin. SameSite provides another layer.
 [OWASP's CSRF guidance](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
 explains the separate roles of these controls.
 
-ADMIN_CORS_ALLOWED_ORIGINS accepts explicit HTTP(S) origins and rejects wildcards. Browser login and writes require
-an allowed Origin. Metadata GET may omit Origin for same-origin requests; an explicit untrusted Origin is rejected.
-Authentication responses use Cache-Control: no-store. Public CORS may remain wildcard, without credentials.
-An explicit Authorization header takes precedence; invalid bearer credentials cannot fall back to a valid cookie.
+`ADMIN_CORS_ALLOWED_ORIGINS` accepts explicit HTTP(S) origins and rejects wildcards. Browser login, cookie-authenticated
+changes, refresh and logout require an allowed Origin. Metadata GET may omit Origin for same-origin requests;
+an explicit untrusted Origin is rejected. A custom Ktor plugin separates public CORS, which may allow `*` without
+credentials, from credentialed access for explicit admin origins. It also varies responses by Origin. CORS does not
+grant admin permission. An explicit Authorization header takes precedence; invalid bearer credentials cannot fall
+back to a valid cookie. Bearer-authenticated question changes do not use the cookie CSRF check.
 
-Prefer the frontend's same-origin /api proxy and keep Secure enabled in production. Local HTTP development explicitly
-sets AUTH_COOKIE_SECURE=false. Direct cross-site cookies need SameSite=None and Secure, and browser policy can still
+Browser session routes and responses issued by bearer login use `Cache-Control: no-store`; successful answer
+responses also use it. Requests carrying an Authorization header or access cookie are marked no-store by the HTTP
+plugin. This reduces caching of credentials and sensitive results without claiming every rejected login request
+has identical cache headers.
+
+Prefer the frontend's same-origin `/api` proxy and keep Secure enabled in production. Local HTTP development explicitly
+sets `AUTH_COOKIE_SECURE=false`. Direct cross-site cookies need SameSite=None and Secure, and browser policy can still
 block them. See [MDN's cookie documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie).
+Settings reject SameSite=None with Secure disabled. The backend tests cannot establish the deployed browser's policy.
 
 HttpOnly does not eliminate XSS: injected JavaScript could read CSRF metadata and perform authenticated operations.
 The frontend must render user data as text, avoid unsafe HTML injection, and encode for any actual HTML/JS context.
 JSON serialization alone does not prove safe frontend rendering. MFA/passkeys and operational hardening remain separate work.
+
+## Input, storage and abuse controls
+
+The JSON decoder rejects unknown keys, lenient syntax and value coercion. Question text is limited to 1–500 trimmed
+characters; options must contain 2–10 choices of 1–200 trimmed characters each. Options must be unique after trimming
+and case normalization, and the correct answer must match one option under the same normalization. Submitted
+answers have a 1–200-character trimmed limit. UUID route IDs are validated before repository access.
+
+PATCH validates supplied fields, then the repository validates the merged question before saving. For example,
+changing only the options cannot leave an old correct answer outside those options. Generated models describe the
+message shape; these runtime checks protect its meaning. Field limits apply after JSON decoding and do not provide
+an overall request-body size limit.
+
+The external JSON file contains correct answers and must stay private. Missing or blank storage is seeded; invalid
+nonblank content fails startup without being overwritten. Mutations save the replacement file before publishing
+the updated in-memory snapshot. Temporary-file replacement reduces partial writes, with atomic movement where
+supported, but backups and recovery still need separate procedures. There are no SQL queries in this implementation;
+SQL storage would need parameterized queries. A valid UUID alone grants no permission to edit a question.
+
+| Limit | Current scope | Why and limitation |
+|---|---|---|
+| 5 login attempts per minute | Shared by bearer and browser login per connection IP. | Limits repeated password checks, including bcrypt's CPU cost. |
+| 30 refreshes per minute | Separate refresh counter per connection IP. | Bounds repeated token issuance without sharing the answer allowance. |
+| 30 answers per minute | Shared across question IDs per connection IP. | Slows automated answer guessing; it cannot prevent guessing entirely. |
+
+These counters reset on restart and do not coordinate replicas. Shared school networks may share one allowance.
+No trusted forwarded-IP handling is configured; behind a reverse proxy, connection IPs may identify the proxy
+rather than individual players. A shared limiter and a trusted proxy configuration would need deliberate setup.
 
 ## First threat model
 
@@ -113,54 +209,93 @@ The boundaries are client-to-API traffic and the API's access to files and secre
 
 | Threat                 | Example in this project                | Control or remaining work                                                                                    |
 |------------------------|----------------------------------------|--------------------------------------------------------------------------------------------------------------|
-| Spoofing               | Forged admin token or session.         | Verify JWT signatures, claims, purpose and expiry. HTTPS is required.                                 |
+| Spoofing               | Forged JWT or reused stolen credential. | Verify signatures, claims, purpose and expiry; stolen JWTs retain the stateless replay limits. HTTPS is required. |
 | Tampering              | Unauthorised question changes or CSRF. | Protect mutations, check Origin and CSRF for cookies, and validate input. Deployment needs file permissions. |
 | Repudiation            | An admin denies a deletion.            | Request logs exist; an admin audit trail is missing.                                                         |
 | Information disclosure | Errors expose internal details.        | Generic client errors and dotenv redaction. Review internal exception logs.                                  |
 | Denial of service      | Requests exhaust resources.            | Limits are process-local. Body-size limits and load testing remain.                                          |
-| Elevation of privilege | Another role gains admin access.       | Check the configured subject and admin role.                                                                 |
+| Elevation of privilege | A public request or refresh JWT attempts an admin write. | Require an access JWT for the configured subject and admin role. |
 
 ## Validation and its limits
 
-[ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers rejected admin requests, invalid tokens and input, rate limits, CORS and errors. [LocalEnvironmentTest.kt](../../../src/test/kotlin/LocalEnvironmentTest.kt) checks precedence and secret-safe parsing errors.
+| Evidence | What it establishes |
+|---|---|
+| [PasswordHashTest.kt](../../../src/test/kotlin/PasswordHashTest.kt), [AuthServiceTest.kt](../../../src/test/kotlin/AuthServiceTest.kt) | Random salts, work factors, exact credentials, Unicode behavior, wrong-key rejection and no silent 72-byte truncation. |
+| [ApiSettingsTest.kt](../../../src/test/kotlin/ApiSettingsTest.kt), [LocalEnvironmentTest.kt](../../../src/test/kotlin/LocalEnvironmentTest.kt) | Required hashes/secrets, ordered lifetimes, cookie/origin settings, configuration precedence, bcrypt quoting and secret-safe parsing failures. |
+| [JwtTokensTest.kt](../../../src/test/kotlin/JwtTokensTest.kt) | Signature and purpose rejection, malformed claims, exact expiry, metadata and 144 renewals still bounded by the original 24-hour deadline. |
+| [BrowserTokenExpiryTest.kt](../../../src/test/kotlin/BrowserTokenExpiryTest.kt) | One issuance-clock snapshot per pair, expiry during response preparation and expired refresh handling that clears cookies. |
+| [BrowserSessionTest.kt](../../../src/test/kotlin/BrowserSessionTest.kt), [StatelessAuthTest.kt](../../../src/test/kotlin/StatelessAuthTest.kt) | Cookie scope, authenticated changes, Origin/CSRF rejection, metadata, independent-instance verification and logout without copied-token revocation. |
+| [ServerTest.kt](../../../src/test/kotlin/ServerTest.kt), [ContractTest.kt](../../../src/test/kotlin/ContractTest.kt) | HTTP rejection cases, rate limits, CORS, safe errors, public answer omission and actual responses checked against OpenAPI. |
+| [RequestValidationTest.kt](../../../src/test/kotlin/RequestValidationTest.kt), [QuestionRepositoryTest.kt](../../../src/test/kotlin/QuestionRepositoryTest.kt) | Validation boundaries, merged question consistency, malformed storage and persistence failures. |
 
-[BrowserSessionTest.kt](../../../src/test/kotlin/BrowserSessionTest.kt) and [StatelessAuthTest.kt](../../../src/test/kotlin/StatelessAuthTest.kt) cover cookie flags and scope, authenticated changes, JWT metadata, CSRF/Origin rejection, expiry and independent-instance authentication. [ApiSettingsTest.kt](../../../src/test/kotlin/ApiSettingsTest.kt) checks lifetime configuration and cookie settings. These backend tests do not verify the browser UI or frontend migration.
+These tests use isolated test credentials, temporary files and controlled clocks. They run the backend in process
+and do not establish browser UI or deployed HTTPS/proxy behavior.
 
-[JwtTokensTest.kt](../../../src/test/kotlin/JwtTokensTest.kt) models 144 renewals with a controlled clock and checks
-that the final tokens still expire at the original 24-hour deadline. It also checks malformed login claims and
-renewal beyond the previous refresh expiry. [BrowserTokenExpiryTest.kt](../../../src/test/kotlin/BrowserTokenExpiryTest.kt)
-checks one clock snapshot per issued pair and expiry during request handling. These checks do not need to wait a real day.
+The [testing document](../starting-points/testing-fundamentals.md) records a separate local real-backend browser smoke
+run on 10 November 2026: Chromium used the Vue frontend and Vite proxy against the packaged Ktor JAR with 2-second
+access, 6-second refresh and 18-second absolute lifetimes. Five protected creates passed across repeated renewal;
+both JWT cookies changed while the original login claims stayed fixed. Missing CSRF returned `403`, the final
+refresh after the absolute deadline returned `401`, the UI required a fresh login, and logout cleared both cookies.
+This was an ad hoc local run, rather than a checked-in CI fixture. The frontend Playwright suite uses its own fake
+API and provides separate evidence.
 
-I can rerun these checks with:
+To run backend contract validation, tests and coverage gates in **PowerShell 7+**:
 
-```sh
-./gradlew test
+```powershell
+./gradlew.bat check
 ```
 
-Regression tests demonstrate specific controls, not complete security or completed vulnerability labs.
+In **Linux/Bash**:
+
+```bash
+./gradlew check
+```
+
+`check` enforces 90% line and 80% branch coverage for handwritten application code; generated DTOs are excluded.
+The [CI workflow](../../../.github/workflows/ci.yml) runs validation, these checks and JAR packaging with read-only
+repository permissions and no persisted checkout credentials. Docker builds run the same checks before packaging.
+CI currently has no automated npm, JVM or image vulnerability scan and does not deploy the application. Tests and
+coverage establish specific behavior, not complete security or completed vulnerability labs.
 
 ## Privacy, regulations and impact
 
-I connect the requirements to concrete measures while keeping the limits visible and used GDPR law as a source: https://eur-lex.europa.eu/eli/reg/2016/679/oj/eng
+I use the [GDPR text](https://eur-lex.europa.eu/eli/reg/2016/679/oj/eng) and the European Commission's
+[explanation of its principles](https://commission.europa.eu/law/law-topic/data-protection/information-business-and-organisations/principles-gdpr_en)
+as references for data minimisation, protection by design and appropriate security. The table connects those
+principles to technical measures; it does not establish the project's legal scope or compliance.
 
-| Requirement                                      | Measure in this API                                                                     | What remains                                                                                 |
+| Principle                                        | Measure in this API                                                                     | What remains                                                                                 |
 |--------------------------------------------------|-----------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
 | GDPR: data minimisation and protection by design | No player registration, stored player profiles, answer history or authentication-session registry.                       | Check hosting logs, retention and the processing purpose before deployment.                  |
 | GDPR: appropriate security                       | Restricted admin operations, token verification and bounded input.                      | Assess deployment risks, HTTPS, access to logs and operational procedures.                   |
 
-Connection IPs used for rate limiting can still be personal data. Shared school networks may group students under one limit.
+The admin username appears in JWTs and browser metadata. Connection IPs used for rate limiting and hosting logs
+can still involve personal data. Avoiding player accounts and a session registry reduces retained data; it does
+not remove the need to review processing purposes, log access and retention. Non-root container execution limits
+runtime privileges, while private file permissions, HTTPS, secrets and backups remain deployment responsibilities.
 
 ## Dependency scan triage
 
-On 9 November 2026, npm audit --json in shared reported seven dependency entries: five high and two moderate,
-all in the development-only OpenAPI Generator wrapper tree. Three underlying advisories concern basic-ftp
+On 10 November 2026, `npm --prefix shared audit --json` reported seven affected dependency entries: five high and
+two moderate, all in the development-only OpenAPI Generator wrapper tree. The check used the pinned shared revision
+`a7fbb56`; three underlying advisories concern basic-ftp
 ([CPU denial of service](https://github.com/advisories/GHSA-c475-qrg2-pj4r)), glob
 ([cancellation bypass](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)) and minimatch
 ([denial of service](https://github.com/advisories/GHSA-g3hv-75wg-m249)); the other entries propagate those findings.
-These npm packages are not included in the backend JAR. The current workflow processes the repository's trusted
-OpenAPI file, but that does not remove the vulnerabilities. Findings remain open; do not process untrusted specs or
-proxy configuration with this toolchain. npm's suggested force fix downgrades the generator wrapper and needs separate
-compatibility review. No force upgrade or downgrade was applied during this authentication change.
+These npm packages belong to the shared TypeScript-contract tooling. The backend uses the Gradle/Java generator;
+its JAR and container image do not include this npm dependency tree. Processing the repository's trusted OpenAPI
+file limits exposure without fixing the vulnerabilities. Findings remain open; untrusted specs or proxy
+configuration should not be processed with this toolchain. npm suggests a breaking downgrade of the wrapper to
+`2.13.12`, which needs separate compatibility review. No dependency changes were applied.
+
+The audit command works in **PowerShell 7+ and Linux/Bash**, from the backend root:
+
+```sh
+npm --prefix shared audit --json
+```
+
+It currently exits with status `1` because vulnerabilities were reported. This is a dated scan of the shared npm
+tooling; it does not establish that the JVM dependencies or container image are free of vulnerabilities.
 
 This was an npm audit, not an OWASP Dependency-Check or Snyk run. The JVM runtime dependencies, a peer code-review
 report, a CRA applicability assessment and completed vulnerability labs still require their own evidence. The GDPR
