@@ -10,20 +10,27 @@
 ## Test strategy
 
 This strategy covers the backend authentication change and question API. The highest risks are unauthorized question
-changes, refresh JWTs being accepted as access, missing CSRF/Origin checks, token expiry errors, credential leakage
+changes, refresh JWTs being accepted as access, missing CSRF/Origin checks, renewal extending the original login deadline, credential leakage
 and accidental reintroduction of backend authentication state.
 
 | Test level | Scope and purpose | Existing evidence |
 |---|---|---|
-| Unit | Configuration boundaries, salted password verification, JWT signature/claims/purpose/expiry, input rules and cookie policy. Controlled clocks make expiry tests deterministic. | Settings, auth, JWT, browser-token and validation specs under src/test/kotlin. |
+| Unit | Configuration boundaries, salted password verification, JWT signature/claims/purpose/expiry, rolling refresh, the absolute login deadline, input rules and cookie policy. Controlled clocks make expiry tests deterministic. | Settings, auth, JWT, browser-token and validation specs under src/test/kotlin. |
 | Component/integration | Ktor routing, auth providers, JSON, Origin/CSRF, rate limiting and real temporary-file persistence together. Independent application instances establish stateless token validation. | ServerTest, BrowserSessionTest, StatelessAuthTest and repository tests. |
 | API contract | Compare actual HTTP requests and responses with the authoritative OpenAPI file; verify public responses omit correct answers. Generated TypeScript examples check consumer model compatibility. | ContractTest and shared/examples/typescript-contract.ts. |
-| Packaged API smoke | Run the bundled JAR over real loopback HTTP with isolated temporary storage, disposable credentials and environment-configured 2-second access / 6-second refresh lifetimes. | On 9 November 2026: login 200, missing CSRF 403, authorized writes 201, access expiry 401, refresh 200 and final refresh expiry 401. Late access renewal ended at the original refresh deadline. The server and temporary data were removed afterward. |
+| Previous packaged API smoke | The earlier fixed-refresh implementation ran over real loopback HTTP with isolated temporary storage, disposable credentials and 2-second access / 6-second refresh lifetimes. | On 9 November 2026: login 200, missing CSRF 403, authorized writes 201, access expiry 401, refresh 200 and final refresh expiry 401. Late access renewal ended at the original refresh deadline. The server and temporary data were removed afterward. This historical run does not establish the new rolling-refresh behavior. |
 | Browser E2E | Intended small set: browser login, protected edit, access refresh, expired-refresh login and logout cookie clearing through the frontend proxy. | Not implemented or run in this backend change. In-process API tests are not browser E2E tests. |
 
 The suite uses Kotest FunSpec and assertions on the JUnit Platform. MockK isolates repository behavior in routing tests;
 real storage tests own temporary directories and remove them afterward. Prefer focused unit tests for isolated rules
 and integration tests for boundaries. A small browser suite should complete the pyramid, not duplicate every unit case.
+
+The current token policy uses JWT_TOKEN_TTL_SECONDS=300, JWT_REFRESH_TOKEN_TTL_SECONDS=600 and
+JWT_ABSOLUTE_TTL_SECONDS=86400 by default. Each successful refresh issues both JWTs again, while preserving the
+signed original auth_time and absolute_exp. Tests cover expiry when a refresh is not renewed within its current
+10-minute lifetime, 144 renewals within a simulated day, shorter final tokens and rejection at the exact 24-hour
+deadline. The server retains no token registry, so tests also preserve the documented limit that an older refresh
+JWT remains usable until its own expiry.
 
 ## Environments, data and responsibilities
 
