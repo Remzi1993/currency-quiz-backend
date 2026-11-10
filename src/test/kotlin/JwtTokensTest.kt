@@ -292,11 +292,11 @@ class JwtTokensTest : FunSpec({
         fixture.clock.advanceMillis(250)
 
         browser.metadata(null, null).shouldBeNull()
-        val pair = browser.metadata(access, refresh).shouldNotBeNull()
-        pair.username shouldBe TOKEN_USERNAME
-        pair.expiresIn shouldBe 600L
-        pair.accessExpiresIn shouldBe 300L
-        pair.csrfToken shouldBe csrf
+        val metadata = browser.metadata(access, refresh).shouldNotBeNull()
+        metadata.username shouldBe TOKEN_USERNAME
+        metadata.expiresIn shouldBe 600L
+        metadata.accessExpiresIn shouldBe 300L
+        metadata.csrfToken shouldBe csrf
         browser.metadata(access, null).shouldNotBeNull().expiresIn shouldBe 300L
         browser.metadata(null, refresh).shouldNotBeNull().accessExpiresIn shouldBe 0L
         val otherAccess = fixture.tokens.verifyAccess(fixture.tokens.issueAccess()).shouldNotBeNull()
