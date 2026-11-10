@@ -17,6 +17,7 @@ security:
   authCookieSecure: "${AUTH_COOKIE_SECURE:true}"
   authCookieSameSite: "${AUTH_COOKIE_SAME_SITE:Strict}"
   refreshTokenTtlSeconds: "${JWT_REFRESH_TOKEN_TTL_SECONDS:600}"
+  absoluteTokenTtlSeconds: "${JWT_ABSOLUTE_TTL_SECONDS:86400}"
 cors:
   allowedOrigins: "${CORS_ALLOWED_ORIGINS:}"
 storage:

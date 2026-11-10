@@ -17,6 +17,7 @@ class ApiSettings(
     val authCookieSecure: Boolean = true,
     val authCookieSameSite: String = "Strict",
     val refreshTokenTtlSeconds: Long = 600,
+    val absoluteTokenTtlSeconds: Long = 86400,
 ) {
     init {
         require(adminUsername.isNotBlank() && adminUsername.length <= 100) {
@@ -33,6 +34,9 @@ class ApiSettings(
         require(tokenTtlSeconds in 1..Int.MAX_VALUE.toLong()) { "security.tokenTtlSeconds must be between 1 and 2147483647" }
         require(refreshTokenTtlSeconds in tokenTtlSeconds..Int.MAX_VALUE.toLong()) {
             "security.refreshTokenTtlSeconds must be at least the access lifetime and at most 2147483647"
+        }
+        require(absoluteTokenTtlSeconds in refreshTokenTtlSeconds..Int.MAX_VALUE.toLong()) {
+            "security.absoluteTokenTtlSeconds must be at least the refresh lifetime and at most 2147483647"
         }
         require(questionsFile.isNotBlank()) { "storage.questionsFile must not be blank" }
         allowedOrigins.forEach(::validateOrigin)
@@ -84,6 +88,8 @@ class ApiSettings(
                 authCookieSameSite = optional("security.authCookieSameSite", "Strict"),
                 refreshTokenTtlSeconds = optional("security.refreshTokenTtlSeconds", "600").toLongOrNull()
                     ?: error("security.refreshTokenTtlSeconds must be an integer"),
+                absoluteTokenTtlSeconds = optional("security.absoluteTokenTtlSeconds", "86400").toLongOrNull()
+                    ?: error("security.absoluteTokenTtlSeconds must be an integer"),
             )
         }
 

@@ -22,6 +22,7 @@ class LocalEnvironmentTest : FunSpec() {
                     JWT_AUDIENCE=local-audience
                     JWT_TOKEN_TTL_SECONDS=300
                     JWT_REFRESH_TOKEN_TTL_SECONDS=600
+                    JWT_ABSOLUTE_TTL_SECONDS=86400
                     CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
                     ADMIN_CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
                     AUTH_COOKIE_SECURE=false
@@ -41,6 +42,7 @@ class LocalEnvironmentTest : FunSpec() {
                     "JWT_AUDIENCE" to "local-audience",
                     "JWT_TOKEN_TTL_SECONDS" to "300",
                     "JWT_REFRESH_TOKEN_TTL_SECONDS" to "600",
+                    "JWT_ABSOLUTE_TTL_SECONDS" to "86400",
                     "CORS_ALLOWED_ORIGINS" to "http://localhost:5173,https://quiz.example",
                     "ADMIN_CORS_ALLOWED_ORIGINS" to "http://localhost:5173,https://quiz.example",
                     "AUTH_COOKIE_SECURE" to "false",
@@ -90,6 +92,22 @@ class LocalEnvironmentTest : FunSpec() {
 
                     properties.getProperty("ADMIN_PASSWORD_HASH") shouldBe hash
                 }
+            }
+        }
+
+        test("absolute token lifetime respects environment and JVM overrides") {
+            withDirectory { directory ->
+                Files.writeString(directory.resolve(".env"), "JWT_ABSOLUTE_TTL_SECONDS=600")
+                val environmentProperties = Properties()
+
+                loadLocalEnvironment(directory, mapOf("JWT_ABSOLUTE_TTL_SECONDS" to "86400"), environmentProperties)
+
+                environmentProperties.isEmpty() shouldBe true
+                val jvmProperties = Properties().apply { setProperty("JWT_ABSOLUTE_TTL_SECONDS", "7200") }
+
+                loadLocalEnvironment(directory, emptyMap(), jvmProperties)
+
+                jvmProperties.getProperty("JWT_ABSOLUTE_TTL_SECONDS") shouldBe "7200"
             }
         }
 

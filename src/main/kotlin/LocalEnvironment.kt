@@ -10,7 +10,7 @@ import java.util.Properties
 private val applicationEnvironmentKeys = setOf(
     "QUESTIONS_FILE", "PORT", "ADMIN_USERNAME", "ADMIN_PASSWORD_HASH", "JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE",
     "JWT_TOKEN_TTL_SECONDS", "CORS_ALLOWED_ORIGINS", "ADMIN_CORS_ALLOWED_ORIGINS", "AUTH_COOKIE_SECURE",
-    "AUTH_COOKIE_SAME_SITE", "JWT_REFRESH_TOKEN_TTL_SECONDS",
+    "AUTH_COOKIE_SAME_SITE", "JWT_REFRESH_TOKEN_TTL_SECONDS", "JWT_ABSOLUTE_TTL_SECONDS",
 )
 
 /** Ktor's YAML substitutions read JVM properties as well as OS environment variables. */
