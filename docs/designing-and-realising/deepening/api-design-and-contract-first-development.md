@@ -41,9 +41,12 @@ the frontend separately validates incoming JSON. Request validation and authoris
 
 Bearer clients and browsers both use stateless JWT verification. Browsers receive access and refresh JWTs in HttpOnly
 cookies, and cookie writes additionally require a trusted Origin and JWT-bound CSRF header. Access defaults to five
-minutes; refresh to ten minutes from login. Refresh renews access within the original refresh deadline. No authentication
-session or token registry is stored. Logout clears cookies, but copied JWTs remain valid until expiry. Question content
-is stored in a JSON file.
+minutes; each refresh to ten minutes from issuance. Refresh renews both JWT cookies with the same CSRF nonce, bounded
+by an immutable absolute deadline that defaults to 24 hours from original sign-in. All three lifetimes are configurable.
+Signed `auth_time` and `absolute_exp` claims preserve the original deadline across renewal; new tokens are shortened
+near it. Metadata remains four fields, with `expiresIn` reporting the current refresh lifetime. No authentication session
+or token registry is stored. Logout clears cookies, but earlier JWTs remain valid until their own expiry; replacement
+does not provide reuse detection. Question content is stored in a JSON file.
 
 ## Versions and updates
 

@@ -218,7 +218,8 @@ Changing it invalidates previously issued tokens.
 | `JWT_ISSUER`                     | No       | `currencyquiz-api`                                                                                                         |
 | `JWT_AUDIENCE`                   | No       | `currencyquiz-admin`                                                                                                       |
 | `JWT_TOKEN_TTL_SECONDS`          | No       | `300`; positive integer seconds, at most 2147483647, for access JWTs                                                      |
-| `JWT_REFRESH_TOKEN_TTL_SECONDS`  | No       | `600`; at least the access lifetime, at most 2147483647 seconds, measured from login                                      |
+| `JWT_REFRESH_TOKEN_TTL_SECONDS`  | No       | `600`; positive seconds from each issuance, at least the access lifetime and at most the absolute lifetime                |
+| `JWT_ABSOLUTE_TTL_SECONDS`       | No       | `86400` (24 hours); positive seconds from original sign-in, at least the refresh lifetime and at most 2147483647          |
 | `ADMIN_CORS_ALLOWED_ORIGINS`     | No       | Empty default; explicit comma-separated frontend origins. `*` is rejected.                                                 |
 | `AUTH_COOKIE_SECURE`             | No       | `true`; set `false` only for local HTTP development                                                                        |
 | `AUTH_COOKIE_SAME_SITE`          | No       | `Strict`; supports `Lax` or `None`, with `None` requiring Secure                                                           |
@@ -260,7 +261,7 @@ All request bodies use `Content-Type: application/json`.
 | `POST`   | `/api/v1/auth/login`             | Admin credentials                                | `200`: JWT access token                                       |
 | `POST`   | `/api/v1/auth/session`           | Admin credentials + trusted Origin               | `200`: metadata and HttpOnly access/refresh cookies           |
 | `GET`    | `/api/v1/auth/session`           | Access or current refresh cookie                 | `200`: metadata, without extending expiry                     |
-| `POST`   | `/api/v1/auth/session/refresh`   | Refresh cookie + CSRF + trusted Origin           | `200`: new access JWT; refresh deadline stays fixed            |
+| `POST`   | `/api/v1/auth/session/refresh`   | Refresh cookie + CSRF + trusted Origin           | `200`: new access and refresh JWTs within the absolute deadline |
 | `DELETE` | `/api/v1/auth/session`           | Access or refresh cookie + CSRF + trusted Origin | `204`: clear both cookies                                      |
 | `POST`   | `/api/v1/questions`              | JWT or access cookie + CSRF                      | `201`: created question; `Location` identifies its public URL |
 | `PATCH`  | `/api/v1/questions/{id}`         | JWT or access cookie + CSRF                      | `200`: updated question                                       |
@@ -273,30 +274,41 @@ editing, or deleting a question. Tokens expire after the configured lifetime; lo
 
 Browser login sets signed access and refresh JWTs in host-only HttpOnly cookies, with Secure enabled by default and
 `SameSite=Strict`. Access is scoped to `/api/v1`; refresh to `/api/v1/auth/session`. The backend verifies each JWT's
-signature, issuer, audience, subject, role, purpose, issue time and expiry. It stores no authentication sessions,
+signature, issuer, audience, subject, role, purpose, issue time, expiry and original sign-in deadline. It stores no authentication sessions,
 token registry, activity history or client IP records for authentication. The URL contains `session` for frontend
 compatibility; it does not imply a server-side session.
 
 Login, metadata reads and refresh return only `{ username, expiresIn, accessExpiresIn, csrfToken }`.
-`expiresIn` is the refresh time remaining, or access time when only access is available. Lifetimes are in seconds.
+`expiresIn` is the current refresh time remaining, or access time when only access is available. Lifetimes are in seconds.
 Keep CSRF in memory and use `credentials: 'include'`; keep JWTs out of JavaScript-accessible storage.
 
-Access defaults to **5 minutes** and refresh to **10 minutes from login**, adjustable using the two JWT lifetime
-environment variables. Refresh renews access without changing the refresh JWT or its deadline. Renewed access cannot
-outlive refresh. Reads do not issue tokens. There is no idle timer or activity endpoint; log in again after refresh expires.
+Access defaults to **5 minutes from issuance**, each refresh JWT to **10 minutes from issuance**, and the absolute
+login lifetime to **24 hours from original sign-in**. Configure these with `JWT_TOKEN_TTL_SECONDS`,
+`JWT_REFRESH_TOKEN_TTL_SECONDS` and `JWT_ABSOLUTE_TTL_SECONDS`. Values must be positive integers in seconds, with
+access lifetime ≤ refresh lifetime ≤ absolute lifetime. Short defaults reduce the exposure window; increasing them
+deliberately increases it.
+
+Successful refresh replaces both JWT cookies and preserves the CSRF nonce. Each new expiry is the earlier of its
+configured lifetime and the original absolute deadline. Both JWTs carry signed `auth_time` and `absolute_exp` claims;
+renewal preserves these values. For example, refreshing with 20 seconds left before the absolute deadline gives both
+JWTs only 20 seconds. A fresh sign-in is required at the absolute deadline, or earlier if the current refresh JWT expires
+without renewal. Reads issue no tokens and extend no expiry. There is no activity endpoint or separate idle timer.
 The refresh JWT is never accepted for question management.
 
 Use the frontend's same-origin `/api` proxy to `https://currencyquiz-backend.onrender.com`; leave `VITE_API_BASE_URL` empty. 
 Browser cookies then belong to the frontend host. Render still needs that exact frontend origin in `ADMIN_CORS_ALLOWED_ORIGINS`. 
 Direct cross-site cookies require `SameSite=None; Secure` and may be blocked by browser policies.
 
-Logout clears both cookies. Without server-side state, copied JWTs remain valid until expiry and refresh reuse cannot
-be detected. Changing the signing key invalidates all JWTs. With the same key and configuration, tokens survive
+Logout clears both cookies. Without server-side state, copied JWTs remain valid until their own expiry and refresh reuse cannot
+be detected. A copied refresh JWT and CSRF value can be used to continue renewal until the original absolute deadline;
+replacement alone does not make previous tokens single-use. Changing the signing key invalidates all JWTs. With the same key and configuration, tokens survive
 backend restarts and work across instances. Rate limiting separately uses transient connection-IP buckets; request
 logs contain the method, path and status, without credentials or IPs.
 
 Migration: replace `ADMIN_PASSWORD` with `ADMIN_PASSWORD_HASH`, remove `ADMIN_SESSION_IDLE_SECONDS` and
-`ADMIN_SESSION_ABSOLUTE_SECONDS`, and set `JWT_REFRESH_TOKEN_TTL_SECONDS=600`. Browser clients must stop calling
+`ADMIN_SESSION_ABSOLUTE_SECONDS`, and set `JWT_REFRESH_TOKEN_TTL_SECONDS=600` and `JWT_ABSOLUTE_TTL_SECONDS=86400`.
+Tokens issued before the signed `auth_time` and `absolute_exp` claims were introduced require a fresh sign-in.
+Browser clients must stop calling
 `/auth/session/activity`, remove `absoluteExpiresIn`, and use the new meaning of `expiresIn`. Adopt the new shared
 contract revision in the frontend before deployment; frontend changes are outside this backend checkout.
 
@@ -456,8 +468,8 @@ and redeploy the service to allow browser clients from any origin. Use explicit 
 Changing the local `.env` or `.env.example` does not update Render's environment.
 
 For browser administration also set `ADMIN_CORS_ALLOWED_ORIGINS` to the exact deployed frontend origin, 
-`AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAME_SITE=Strict`, `JWT_TOKEN_TTL_SECONDS=300`, and
-`JWT_REFRESH_TOKEN_TTL_SECONDS=600`. Replace `ADMIN_PASSWORD` with the generated `ADMIN_PASSWORD_HASH` and remove
+`AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAME_SITE=Strict`, `JWT_TOKEN_TTL_SECONDS=300`,
+`JWT_REFRESH_TOKEN_TTL_SECONDS=600` and `JWT_ABSOLUTE_TTL_SECONDS=86400`. Replace `ADMIN_PASSWORD` with the generated `ADMIN_PASSWORD_HASH` and remove
 the old idle/absolute session variables. These environment changes and a live deployment must be applied on Render separately.
 
 Use Render's supplied `PORT`; the application binds to `0.0.0.0`. Set the HTTP health-check path to `/`. 

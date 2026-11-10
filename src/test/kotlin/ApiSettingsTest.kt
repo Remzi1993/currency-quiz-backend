@@ -9,11 +9,12 @@ import io.ktor.server.config.MapApplicationConfig
 
 class ApiSettingsTest : FunSpec() {
     init {
-        test("defaults use five and ten minute lifetimes and require explicit browser origins") {
+        test("defaults use five and ten minute tokens with a twenty four hour absolute lifetime") {
             val settings = ApiSettings.from(config())
 
             settings.tokenTtlSeconds shouldBe 300L
             settings.refreshTokenTtlSeconds shouldBe 600L
+            settings.absoluteTokenTtlSeconds shouldBe 86_400L
             settings.allowedOrigins shouldBe emptyList()
             settings.adminAllowedOrigins shouldBe emptyList()
             settings.authCookieSecure shouldBe true
@@ -33,6 +34,10 @@ class ApiSettingsTest : FunSpec() {
                 "security.refreshTokenTtlSeconds" to "299",
                 "security.refreshTokenTtlSeconds" to "0",
                 "security.refreshTokenTtlSeconds" to "-1",
+                "security.absoluteTokenTtlSeconds" to "2147483648",
+                "security.absoluteTokenTtlSeconds" to "599",
+                "security.absoluteTokenTtlSeconds" to "0",
+                "security.absoluteTokenTtlSeconds" to "-1",
             ) { (key, value) ->
                 shouldThrow<IllegalArgumentException> { ApiSettings.from(config().apply { put(key, value) }) }
             }
@@ -41,7 +46,7 @@ class ApiSettingsTest : FunSpec() {
         context("integer configuration must be parseable without overflow") {
             withTests(
                 nameFn = { (key, value) -> "$key rejects '$value'" },
-                listOf("security.tokenTtlSeconds", "security.refreshTokenTtlSeconds")
+                listOf("security.tokenTtlSeconds", "security.refreshTokenTtlSeconds", "security.absoluteTokenTtlSeconds")
                     .flatMap { key -> listOf("", "1.5", "seconds", "9223372036854775808").map { key to it } },
             ) { (key, value) ->
                 shouldThrow<IllegalStateException> {
@@ -55,11 +60,25 @@ class ApiSettingsTest : FunSpec() {
                 val settings = ApiSettings.from(config().apply {
                     put("security.tokenTtlSeconds", "$seconds")
                     put("security.refreshTokenTtlSeconds", "$seconds")
+                    put("security.absoluteTokenTtlSeconds", "$seconds")
                 })
 
                 settings.tokenTtlSeconds shouldBe seconds
                 settings.refreshTokenTtlSeconds shouldBe seconds
+                settings.absoluteTokenTtlSeconds shouldBe seconds
             }
+        }
+
+        test("all token lifetimes accept ordered custom configuration") {
+            val settings = ApiSettings.from(config().apply {
+                put("security.tokenTtlSeconds", "60")
+                put("security.refreshTokenTtlSeconds", "120")
+                put("security.absoluteTokenTtlSeconds", "300")
+            })
+
+            settings.tokenTtlSeconds shouldBe 60L
+            settings.refreshTokenTtlSeconds shouldBe 120L
+            settings.absoluteTokenTtlSeconds shouldBe 300L
         }
 
         context("required credentials cannot be missing or blank") {
