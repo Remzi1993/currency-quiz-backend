@@ -17,17 +17,21 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.Base64
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 
 class JwtTokensTest : FunSpec({
     test("access and refresh JWTs carry signed purpose and CSRF claims with separate lifetimes") {
         val fixture = TokenFixture()
-        val csrf = fixture.tokens.newCsrfToken()
+        val pair = fixture.tokens.startLogin()
+        val csrf = JWT.decode(pair.accessToken).getClaim("csrf").asString()
         csrf shouldMatch Regex("^[A-Za-z0-9_-]{43}$")
-        fixture.tokens.newCsrfToken() shouldNotBe csrf
+        JWT.decode(fixture.tokens.startLogin().accessToken).getClaim("csrf").asString() shouldNotBe csrf
 
         for ((value, purpose, lifetime, type) in listOf(
-            listOf(fixture.tokens.issueAccess(csrf), "access", "300", "at+jwt"),
-            listOf(fixture.tokens.issueRefresh(csrf), "refresh", "600", "refresh+jwt"),
+            listOf(pair.accessToken, "access", "300", "at+jwt"),
+            listOf(pair.refreshToken, "refresh", "600", "refresh+jwt"),
         )) {
             val jwt = JWT.decode(value)
             Algorithm.HMAC256(TOKEN_SECRET).verify(jwt)
@@ -40,6 +44,8 @@ class JwtTokensTest : FunSpec({
             jwt.getClaim("token_use").asString() shouldBe purpose
             jwt.getClaim("csrf").asString() shouldBe csrf
             jwt.issuedAtAsInstant shouldBe fixture.clock.instant()
+            jwt.getClaim("auth_time").asLong() shouldBe fixture.clock.instant().epochSecond
+            jwt.getClaim("absolute_exp").asLong() shouldBe fixture.clock.instant().plusSeconds(86_400).epochSecond
             jwt.expiresAtAsInstant.epochSecond - jwt.issuedAtAsInstant.epochSecond shouldBe lifetime.toLong()
             jwt.claims.keys.intersect(setOf("password", "passwordHash", "jwtSecret", "ip", "lastActivityAt")).isEmpty() shouldBe true
             String(java.util.Base64.getUrlDecoder().decode(jwt.payload), Charsets.UTF_8)
@@ -49,8 +55,9 @@ class JwtTokensTest : FunSpec({
 
     test("verification needs only the signing settings and not the issuing service instance") {
         val fixture = TokenFixture()
-        val access = fixture.tokens.issueAccess()
-        val refresh = fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken())
+        val pair = fixture.tokens.startLogin()
+        val access = pair.accessToken
+        val refresh = pair.refreshToken
         val fresh = JwtTokens(fixture.settings, fixture.clock)
 
         fresh.verifyAccess(access).shouldNotBeNull()
@@ -61,8 +68,9 @@ class JwtTokensTest : FunSpec({
 
     test("JWTs expire at the exact access and refresh deadlines without grace time") {
         val fixture = TokenFixture()
-        val access = fixture.tokens.issueAccess()
-        val refresh = fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken())
+        val pair = fixture.tokens.startLogin()
+        val access = pair.accessToken
+        val refresh = pair.refreshToken
 
         fixture.clock.advanceMillis(299_999)
         fixture.tokens.verifyAccess(access).shouldNotBeNull()
@@ -78,8 +86,9 @@ class JwtTokensTest : FunSpec({
 
     test("custom lifetimes apply to issuance and validation") {
         val fixture = TokenFixture(accessSeconds = 12, refreshSeconds = 30)
-        val access = JWT.decode(fixture.tokens.issueAccess())
-        val refresh = JWT.decode(fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken()))
+        val pair = fixture.tokens.startLogin()
+        val access = JWT.decode(pair.accessToken)
+        val refresh = JWT.decode(pair.refreshToken)
 
         access.expiresAtAsInstant shouldBe fixture.clock.instant().plusSeconds(12)
         refresh.expiresAtAsInstant shouldBe fixture.clock.instant().plusSeconds(30)
@@ -89,26 +98,76 @@ class JwtTokensTest : FunSpec({
         }).shouldBeNull()
     }
 
-    test("renewed access cannot outlive the original refresh deadline") {
+    test("renewal replaces both JWTs and extends their lifetime while preserving the login deadline") {
         val fixture = TokenFixture()
-        val csrf = fixture.tokens.newCsrfToken()
-        val refresh = fixture.tokens.verifyRefresh(fixture.tokens.issueRefresh(csrf)).shouldNotBeNull()
-        val deadline = refresh.expiresAtAsInstant
+        val original = fixture.tokens.startLogin()
+        val refresh = fixture.tokens.verifyRefresh(original.refreshToken).shouldNotBeNull()
         fixture.clock.advanceMillis(599_000)
 
-        val access = fixture.tokens.issueAccess(csrf, deadline)
+        val renewed = fixture.tokens.renew(refresh).shouldNotBeNull()
+        val access = JWT.decode(renewed.accessToken)
+        val nextRefresh = JWT.decode(renewed.refreshToken)
 
-        JWT.decode(access).expiresAtAsInstant shouldBe deadline
-        fixture.tokens.verifyAccess(access).shouldNotBeNull()
+        renewed.accessToken shouldNotBe original.accessToken
+        renewed.refreshToken shouldNotBe original.refreshToken
+        access.expiresAtAsInstant shouldBe fixture.clock.instant().plusSeconds(300)
+        nextRefresh.expiresAtAsInstant shouldBe fixture.clock.instant().plusSeconds(600)
+        for (token in listOf(access, nextRefresh)) {
+            token.issuedAtAsInstant shouldBe fixture.clock.instant()
+            token.getClaim("csrf").asString() shouldBe refresh.getClaim("csrf").asString()
+            for (claim in listOf("auth_time", "absolute_exp")) {
+                token.getClaim(claim).asLong() shouldBe refresh.getClaim(claim).asLong()
+            }
+            token.id shouldNotBe refresh.id
+        }
+        access.id shouldNotBe nextRefresh.id
         fixture.clock.advanceMillis(1_000)
-        fixture.tokens.verifyAccess(access).shouldBeNull()
+        fixture.tokens.verifyRefresh(original.refreshToken).shouldBeNull()
+        fixture.tokens.verifyAccess(renewed.accessToken).shouldNotBeNull()
+        fixture.tokens.verifyRefresh(renewed.refreshToken).shouldNotBeNull()
     }
 
-    test("an access deadline cannot extend the configured access lifetime") {
+    test("repeated renewal shortens final tokens and never extends the twenty four hour login deadline") {
         val fixture = TokenFixture()
-        val access = fixture.tokens.issueAccess(deadline = fixture.clock.instant().plusSeconds(600))
+        var pair = fixture.tokens.startLogin()
+        val original = JWT.decode(pair.refreshToken)
+        repeat(144) {
+            fixture.clock.advanceMillis(599_000)
+            val refresh = fixture.tokens.verifyRefresh(pair.refreshToken).shouldNotBeNull()
+            pair = fixture.tokens.renew(refresh).shouldNotBeNull()
+        }
+        val finalAccess = fixture.tokens.verifyAccess(pair.accessToken).shouldNotBeNull()
+        val finalRefresh = fixture.tokens.verifyRefresh(pair.refreshToken).shouldNotBeNull()
 
-        JWT.decode(access).expiresAtAsInstant shouldBe fixture.clock.instant().plusSeconds(300)
+        for (token in listOf(finalAccess, finalRefresh)) {
+            token.getClaim("auth_time").asLong() shouldBe original.getClaim("auth_time").asLong()
+            token.getClaim("absolute_exp").asLong() shouldBe original.getClaim("absolute_exp").asLong()
+            token.expiresAtAsInstant.epochSecond shouldBe original.getClaim("absolute_exp").asLong()
+            fixture.tokens.secondsRemaining(token) shouldBe 144L
+        }
+        fixture.clock.advanceMillis(144_000)
+        fixture.tokens.verifyAccess(pair.accessToken).shouldBeNull()
+        fixture.tokens.verifyRefresh(pair.refreshToken).shouldBeNull()
+        fixture.tokens.renew(finalRefresh).shouldBeNull()
+    }
+
+    test("a previously verified refresh cannot renew after it expires") {
+        val fixture = TokenFixture()
+        val pair = fixture.tokens.startLogin()
+        val refresh = fixture.tokens.verifyRefresh(pair.refreshToken).shouldNotBeNull()
+        fixture.clock.advanceMillis(600_000)
+
+        fixture.tokens.renew(refresh).shouldBeNull()
+    }
+
+    test("valid integer login claims remain usable beyond the thirty two bit epoch range") {
+        val fixture = TokenFixture()
+        fixture.clock.advanceMillis(450_000_000_000)
+        val pair = fixture.tokens.startLogin()
+
+        fixture.tokens.verifyAccess(pair.accessToken).shouldNotBeNull()
+        fixture.tokens.verifyRefresh(pair.refreshToken).shouldNotBeNull()
+        JWT.decode(pair.accessToken).getClaim("auth_time").asLong() shouldBe fixture.clock.instant().epochSecond
     }
 
     context("malformed or unauthenticated values cannot be verified") {
@@ -143,6 +202,27 @@ class JwtTokensTest : FunSpec({
             "missing CSRF" to { withNullClaim("csrf") },
             "wrong CSRF type" to { withClaim("csrf", 1) },
             "malformed CSRF" to { withClaim("csrf", "short") },
+            "missing authentication time" to { withNullClaim("auth_time") },
+            "authentication time string" to { fixture -> withClaim("auth_time", fixture.clock.instant().epochSecond.toString()) },
+            "authentication time boolean" to { withClaim("auth_time", true) },
+            "fractional authentication time" to { fixture -> withClaim("auth_time", fixture.clock.instant().epochSecond + 0.5) },
+            "future authentication time" to { fixture -> withClaim("auth_time", fixture.clock.instant().plusSeconds(1).epochSecond) },
+            "authentication after issue time" to { fixture ->
+                withIssuedAt(fixture.clock.instant().minusSeconds(1))
+                withExpiresAt(fixture.clock.instant().plusSeconds(299))
+            },
+            "missing absolute deadline" to { withNullClaim("absolute_exp") },
+            "absolute deadline string" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().plusSeconds(86_400).epochSecond.toString()) },
+            "absolute deadline boolean" to { withClaim("absolute_exp", true) },
+            "fractional absolute deadline" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().plusSeconds(86_400).epochSecond + 0.5) },
+            "deadline equals authentication time" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().epochSecond) },
+            "deadline before authentication time" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().minusSeconds(1).epochSecond) },
+            "expiry exceeds absolute deadline" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().plusSeconds(1).epochSecond) },
+            "absolute lifetime exceeds policy" to { fixture -> withClaim("absolute_exp", fixture.clock.instant().plusSeconds(86_401).epochSecond) },
+            "legacy token without login context" to {
+                withNullClaim("auth_time")
+                withNullClaim("absolute_exp")
+            },
             "missing issue time" to { withNullClaim("iat") },
             "future issue time" to { fixture -> withIssuedAt(fixture.clock.instant().plusSeconds(1)) },
             "missing expiry" to { withNullClaim("exp") },
@@ -158,9 +238,27 @@ class JwtTokensTest : FunSpec({
         withTests(invalidClaims) { change ->
             val fixture = TokenFixture()
             for (refresh in listOf(false, true)) {
+                if (refresh) fixture.tokens.verifyRefresh(fixture.signed(refresh = true)).shouldNotBeNull()
+                else fixture.tokens.verifyAccess(fixture.signed()).shouldNotBeNull()
                 val value = fixture.signed(refresh) { change(fixture) }
                 if (refresh) fixture.tokens.verifyRefresh(value).shouldBeNull()
                 else fixture.tokens.verifyAccess(value).shouldBeNull()
+            }
+        }
+    }
+
+    test("numeric login claims outside the signed integer range are rejected") {
+        val fixture = TokenFixture()
+        for (refresh in listOf(false, true)) {
+            val baseline = fixture.signed(refresh)
+            if (refresh) fixture.tokens.verifyRefresh(baseline).shouldNotBeNull()
+            else fixture.tokens.verifyAccess(baseline).shouldNotBeNull()
+            for (claim in listOf("auth_time", "absolute_exp")) {
+                for (raw in listOf("9223372036854775808", "-9223372036854775809")) {
+                    val value = fixture.signedWithRawClaim(refresh, claim, raw)
+                    if (refresh) fixture.tokens.verifyRefresh(value).shouldBeNull()
+                    else fixture.tokens.verifyAccess(value).shouldBeNull()
+                }
             }
         }
     }
@@ -187,17 +285,18 @@ class JwtTokensTest : FunSpec({
     test("browser metadata reports remaining verified lifetimes without exposing credentials") {
         val fixture = TokenFixture()
         val browser = BrowserTokens(fixture.settings, fixture.tokens)
-        val csrf = fixture.tokens.newCsrfToken()
-        val access = fixture.tokens.verifyAccess(fixture.tokens.issueAccess(csrf)).shouldNotBeNull()
-        val refresh = fixture.tokens.verifyRefresh(fixture.tokens.issueRefresh(csrf)).shouldNotBeNull()
+        val pair = fixture.tokens.startLogin()
+        val access = fixture.tokens.verifyAccess(pair.accessToken).shouldNotBeNull()
+        val refresh = fixture.tokens.verifyRefresh(pair.refreshToken).shouldNotBeNull()
+        val csrf = access.getClaim("csrf").asString()
         fixture.clock.advanceMillis(250)
 
         browser.metadata(null, null).shouldBeNull()
-        val pair = browser.metadata(access, refresh).shouldNotBeNull()
-        pair.username shouldBe TOKEN_USERNAME
-        pair.expiresIn shouldBe 600L
-        pair.accessExpiresIn shouldBe 300L
-        pair.csrfToken shouldBe csrf
+        val metadata = browser.metadata(access, refresh).shouldNotBeNull()
+        metadata.username shouldBe TOKEN_USERNAME
+        metadata.expiresIn shouldBe 600L
+        metadata.accessExpiresIn shouldBe 300L
+        metadata.csrfToken shouldBe csrf
         browser.metadata(access, null).shouldNotBeNull().expiresIn shouldBe 300L
         browser.metadata(null, refresh).shouldNotBeNull().accessExpiresIn shouldBe 0L
         val otherAccess = fixture.tokens.verifyAccess(fixture.tokens.issueAccess()).shouldNotBeNull()
@@ -215,9 +314,9 @@ class JwtTokensTest : FunSpec({
         )) { (secure, sameSite) ->
             val fixture = TokenFixture(secure = secure, sameSite = sameSite)
             val browser = BrowserTokens(fixture.settings, fixture.tokens)
+            val pair = fixture.tokens.startLogin()
             for (refresh in listOf(false, true)) {
-                val value = if (refresh) fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken())
-                    else fixture.tokens.issueAccess()
+                val value = if (refresh) pair.refreshToken else pair.accessToken
                 val cookie = browser.cookie(value, refresh = refresh)
                 cookie.name shouldBe if (refresh) ADMIN_REFRESH_COOKIE_NAME else ADMIN_COOKIE_NAME
                 cookie.path shouldBe if (refresh) ADMIN_REFRESH_COOKIE_PATH else ADMIN_COOKIE_PATH
@@ -237,8 +336,8 @@ class JwtTokensTest : FunSpec({
     test("CSRF validation matches the signed nonce and trusts only exact admin origins") {
         val fixture = TokenFixture()
         val browser = BrowserTokens(fixture.settings, fixture.tokens)
-        val csrf = fixture.tokens.newCsrfToken()
-        val access = fixture.tokens.verifyAccess(fixture.tokens.issueAccess(csrf)).shouldNotBeNull()
+        val access = fixture.tokens.verifyAccess(fixture.tokens.startLogin().accessToken).shouldNotBeNull()
+        val csrf = access.getClaim("csrf").asString()
 
         for (candidate in listOf(null, "", "+".repeat(43), "short", "a".repeat(43), "a".repeat(44))) {
             browser.validCsrf(access, candidate) shouldBe false
@@ -254,6 +353,7 @@ class JwtTokensTest : FunSpec({
 private class TokenFixture(
     accessSeconds: Long = 300,
     refreshSeconds: Long = 600,
+    absoluteSeconds: Long = 86_400,
     secure: Boolean = true,
     sameSite: String = "Strict",
 ) {
@@ -264,6 +364,7 @@ private class TokenFixture(
         jwtSecret = TOKEN_SECRET,
         tokenTtlSeconds = accessSeconds,
         refreshTokenTtlSeconds = refreshSeconds,
+        absoluteTokenTtlSeconds = absoluteSeconds,
         adminAllowedOrigins = listOf(TOKEN_ORIGIN),
         authCookieSecure = secure,
         authCookieSameSite = sameSite,
@@ -282,10 +383,26 @@ private class TokenFixture(
         .withClaim("role", "admin")
         .withClaim("token_use", if (refresh) "refresh" else "access")
         .withClaim("csrf", "a".repeat(43))
+        .withClaim("auth_time", clock.instant().epochSecond)
+        .withClaim("absolute_exp", clock.instant().plusSeconds(settings.absoluteTokenTtlSeconds).epochSecond)
         .withIssuedAt(clock.instant())
         .withExpiresAt(clock.instant().plusSeconds(if (refresh) settings.refreshTokenTtlSeconds else settings.tokenTtlSeconds))
         .apply(change)
         .sign(algorithm)
+
+    fun signedWithRawClaim(refresh: Boolean, claim: String, raw: String): String {
+        val parts = signed(refresh).split('.')
+        val payload = String(Base64.getUrlDecoder().decode(parts[1]), Charsets.UTF_8)
+        val field = Regex("\"${Regex.escape(claim)}\":-?\\d+")
+        require(field.containsMatchIn(payload))
+        val altered = field.replaceFirst(payload, "\"$claim\":$raw")
+        val encoded = Base64.getUrlEncoder().withoutPadding().encodeToString(altered.toByteArray(Charsets.UTF_8))
+        val content = "${parts[0]}.$encoded"
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(TOKEN_SECRET.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        val signature = Base64.getUrlEncoder().withoutPadding().encodeToString(mac.doFinal(content.toByteArray(Charsets.US_ASCII)))
+        return "$content.$signature"
+    }
 }
 
 private class TokenClock : Clock() {

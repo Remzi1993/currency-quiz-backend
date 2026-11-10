@@ -56,6 +56,8 @@ class AuthServiceTest : FunSpec({
             decoded.getClaim("role").asString() shouldBe "admin"
             decoded.getClaim("token_use").asString() shouldBe "access"
             decoded.issuedAtAsInstant.epochSecond.let { it in before..after } shouldBe true
+            decoded.getClaim("auth_time").asLong() shouldBe decoded.issuedAtAsInstant.epochSecond
+            decoded.getClaim("absolute_exp").asLong() - decoded.getClaim("auth_time").asLong() shouldBe settings.absoluteTokenTtlSeconds
             decoded.expiresAtAsInstant.epochSecond - decoded.issuedAtAsInstant.epochSecond shouldBe lifetime
             response.expiresIn shouldBe lifetime
             response.tokenType shouldBe TokenResponse.TokenType.Bearer

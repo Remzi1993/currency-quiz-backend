@@ -10,35 +10,42 @@
 ## Test strategy
 
 This strategy covers the backend authentication change and question API. The highest risks are unauthorized question
-changes, refresh JWTs being accepted as access, missing CSRF/Origin checks, token expiry errors, credential leakage
+changes, refresh JWTs being accepted as access, missing CSRF/Origin checks, renewal extending the original login deadline, credential leakage
 and accidental reintroduction of backend authentication state.
 
 | Test level | Scope and purpose | Existing evidence |
 |---|---|---|
-| Unit | Configuration boundaries, salted password verification, JWT signature/claims/purpose/expiry, input rules and cookie policy. Controlled clocks make expiry tests deterministic. | Settings, auth, JWT, browser-token and validation specs under src/test/kotlin. |
+| Unit | Configuration boundaries, salted password verification, JWT signature/claims/purpose/expiry, rolling refresh, the absolute login deadline, input rules and cookie policy. Controlled clocks make expiry tests deterministic. | Settings, auth, JWT, browser-token and validation specs under src/test/kotlin. |
 | Component/integration | Ktor routing, auth providers, JSON, Origin/CSRF, rate limiting and real temporary-file persistence together. Independent application instances establish stateless token validation. | ServerTest, BrowserSessionTest, StatelessAuthTest and repository tests. |
 | API contract | Compare actual HTTP requests and responses with the authoritative OpenAPI file; verify public responses omit correct answers. Generated TypeScript examples check consumer model compatibility. | ContractTest and shared/examples/typescript-contract.ts. |
-| Packaged API smoke | Run the bundled JAR over real loopback HTTP with isolated temporary storage, disposable credentials and environment-configured 2-second access / 6-second refresh lifetimes. | On 9 November 2026: login 200, missing CSRF 403, authorized writes 201, access expiry 401, refresh 200 and final refresh expiry 401. Late access renewal ended at the original refresh deadline. The server and temporary data were removed afterward. |
-| Browser E2E | Intended small set: browser login, protected edit, access refresh, expired-refresh login and logout cookie clearing through the frontend proxy. | Not implemented or run in this backend change. In-process API tests are not browser E2E tests. |
+| Real backend browser smoke | Headless Chromium uses the Vue frontend and its Vite proxy against the packaged Ktor JAR, with disposable credentials, temporary JSON storage and environment-configured 2-second access / 6-second refresh / 18-second absolute lifetimes. | On 10 November 2026: five protected question creates passed across repeated renewal; both HttpOnly cookies changed while original signed login claims stayed fixed. Missing CSRF returned 403; the final refresh returned 401 after the absolute deadline. The UI required a fresh login and logout cleared both cookies. This was an ad hoc local smoke run, not a checked-in CI fixture. |
+| Frontend browser suite | Six Playwright journeys cover public play and admin login, renewal, question management, expiry and logout. | The frontend suite passed against its owned fake API. That suite and the real-backend smoke establish different boundaries. |
 
 The suite uses Kotest FunSpec and assertions on the JUnit Platform. MockK isolates repository behavior in routing tests;
 real storage tests own temporary directories and remove them afterward. Prefer focused unit tests for isolated rules
-and integration tests for boundaries. A small browser suite should complete the pyramid, not duplicate every unit case.
+and integration tests for boundaries. The frontend browser suite exercises user journeys rather than duplicating every unit case.
+
+The current token policy uses JWT_TOKEN_TTL_SECONDS=300, JWT_REFRESH_TOKEN_TTL_SECONDS=600 and
+JWT_ABSOLUTE_TTL_SECONDS=86400 by default. Each successful refresh issues both JWTs again, while preserving the
+signed original auth_time and absolute_exp. Tests cover expiry when a refresh is not renewed within its current
+10-minute lifetime, 144 renewals within a simulated day, shorter final tokens and rejection at the exact 24-hour
+deadline. The server retains no token registry, so tests also preserve the documented limit that an older refresh
+JWT remains usable until its own expiry.
 
 ## Environments, data and responsibilities
 
 Each backend test owns settings, test credentials, clocks and temporary storage. It never reads the developer's .env,
 contacts production, or shares mutable data with another test. This provides an isolated test environment while
 exercising the same application wiring. CI uses JDK25 and runs contract validation, tests, coverage gates and packaging.
-A separate deployed staging environment and realistic browser/proxy test run remain future work.
+A separate deployed staging environment and production HTTPS verification remain future work.
 
 The developer maintains tests with behavior changes, the reviewer checks rejection cases and contract compatibility,
 and the deployment owner configures HTTPS, trusted origins, secrets and staging isolation. Use synthetic question data
 and test-only password hashes; never copy production credentials or personal data into fixtures.
 
-For future browser E2E tests, create and delete data through test-only authenticated setup/cleanup, use stable accessible
-selectors, and wait for observable page/network state rather than fixed sleeps. Keep clocks and data deterministic,
-run tests independently, and investigate flakes before adding retries. These are planned practices, not completed evidence.
+Frontend E2E tests own their test data and use stable accessible selectors and observable page/network state. The
+real-backend smoke deliberately waited for the short, signed JWT deadlines to test actual expiry. Keep clocks and
+data deterministic in the regular suite, run tests independently, and investigate flakes before adding retries.
 
 ## Entry and exit criteria
 
@@ -47,8 +54,8 @@ any reported authentication defect with a focused failing regression before chan
 
 Exit: relevant regressions pass, OpenAPI is valid, generated declarations are current, the full backend check passes,
 and the existing JaCoCo gate reaches at least 90% line and 80% branch coverage for application code. Review compatibility
-changes, dependency findings and remaining gaps before release. Frontend migration and browser E2E remain required
-before claiming the complete deployed flow works.
+changes, dependency findings and remaining gaps before release. Local frontend/backend verification does not establish
+that the deployed HTTPS configuration works.
 
 Run the backend gates in PowerShell 7+:
 

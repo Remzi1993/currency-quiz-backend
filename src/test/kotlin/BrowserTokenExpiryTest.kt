@@ -26,19 +26,53 @@ class BrowserTokenExpiryTest : FunSpec({
             val fixture = ExpiryFixture(accessSeconds = 1, refreshSeconds = 1)
             fixture.clock.advanceAfterNextRead(EXPIRY_START.plusSeconds(1))
 
-            val value = if (refresh) fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken()) else fixture.tokens.issueAccess()
+            val pair = fixture.tokens.startLogin()
+            val value = if (refresh) pair.refreshToken else pair.accessToken
             val decoded = JWT.decode(value)
 
             decoded.issuedAtAsInstant shouldBe EXPIRY_START
             decoded.expiresAtAsInstant shouldBe EXPIRY_START.plusSeconds(1)
             decoded.expiresAtAsInstant.epochSecond - decoded.issuedAtAsInstant.epochSecond shouldBe 1L
+            JWT.decode(pair.accessToken).issuedAtAsInstant shouldBe JWT.decode(pair.refreshToken).issuedAtAsInstant
+            decoded.getClaim("auth_time").asLong() shouldBe EXPIRY_START.epochSecond
+            decoded.getClaim("absolute_exp").asLong() shouldBe EXPIRY_START.plusSeconds(86_400).epochSecond
+        }
+    }
+
+    test("bearer JWT issuance uses one clock snapshot") {
+        val fixture = ExpiryFixture(accessSeconds = 1, refreshSeconds = 1)
+        fixture.clock.advanceAfterNextRead(EXPIRY_START.plusSeconds(1))
+
+        val token = JWT.decode(fixture.tokens.issueAccess())
+
+        token.issuedAtAsInstant shouldBe EXPIRY_START
+        token.expiresAtAsInstant shouldBe EXPIRY_START.plusSeconds(1)
+        token.getClaim("auth_time").asLong() shouldBe EXPIRY_START.epochSecond
+    }
+
+    test("renewed token pairs use one clock snapshot and preserve their original login context") {
+        val fixture = ExpiryFixture()
+        val original = fixture.tokens.startLogin()
+        val verified = fixture.tokens.verifyRefresh(original.refreshToken).shouldNotBeNull()
+        fixture.clock.advanceTo(EXPIRY_START.plusSeconds(300))
+        fixture.clock.advanceAfterNextRead(EXPIRY_START.plusSeconds(301))
+
+        val renewed = fixture.tokens.renew(verified).shouldNotBeNull()
+
+        for ((value, lifetime) in listOf(renewed.accessToken to 300L, renewed.refreshToken to 600L)) {
+            val token = JWT.decode(value)
+            token.issuedAtAsInstant shouldBe EXPIRY_START.plusSeconds(300)
+            token.expiresAtAsInstant shouldBe EXPIRY_START.plusSeconds(300 + lifetime)
+            token.getClaim("auth_time").asLong() shouldBe EXPIRY_START.epochSecond
+            token.getClaim("absolute_exp").asLong() shouldBe EXPIRY_START.plusSeconds(86_400).epochSecond
         }
     }
 
     context("credentials can expire after verification while a response is prepared") {
         withTests(mapOf("access" to false, "refresh" to true)) { refresh ->
             val fixture = ExpiryFixture()
-            val value = if (refresh) fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken()) else fixture.tokens.issueAccess()
+            val pair = fixture.tokens.startLogin()
+            val value = if (refresh) pair.refreshToken else pair.accessToken
             val verified = (if (refresh) fixture.tokens.verifyRefresh(value) else fixture.tokens.verifyAccess(value)).shouldNotBeNull()
             fixture.clock.advanceTo(verified.expiresAtAsInstant)
 
@@ -49,7 +83,8 @@ class BrowserTokenExpiryTest : FunSpec({
     context("outbound cookies clear an internally issued credential that expires during response preparation") {
         withTests(mapOf("access" to false, "refresh" to true)) { refresh ->
             val fixture = ExpiryFixture()
-            val value = if (refresh) fixture.tokens.issueRefresh(fixture.tokens.newCsrfToken()) else fixture.tokens.issueAccess()
+            val pair = fixture.tokens.startLogin()
+            val value = if (refresh) pair.refreshToken else pair.accessToken
             fixture.clock.advanceTo(fixture.clock.instant().plusSeconds(if (refresh) 600 else 300))
 
             val cookie = fixture.browser.cookie(value, refresh = refresh)

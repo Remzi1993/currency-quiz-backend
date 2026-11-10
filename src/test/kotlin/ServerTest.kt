@@ -158,6 +158,7 @@ class ServerTest : FunSpec() {
                     signedToken(issuer = "another-issuer"),
                     signedToken(audience = "another-audience"),
                     signedToken(expiresAt = null),
+                    signedToken(includeLoginContext = false),
                 )
                 for (token in invalidTokens) client.createQuestion(token).status shouldBe HttpStatusCode.Unauthorized
                 client.get("/api/v1/questions").json() shouldBe JsonArray(emptyList())
@@ -619,12 +620,18 @@ class ServerTest : FunSpec() {
         issuer: String = "currency-quiz-api",
         audience: String = "currency-quiz-admin",
         expiresAt: Instant? = Instant.now().plusSeconds(120),
+        includeLoginContext: Boolean = true,
     ): String {
+        val issuedAt = Instant.now().minusSeconds(120)
         val token = JWT.create().withHeader(mapOf("typ" to "at+jwt"))
             .withSubject(subject).withClaim("role", role)
             .withClaim("token_use", "access").withClaim("csrf", "c".repeat(43))
             .withIssuer(issuer).withAudience(audience)
-            .withIssuedAt(Date.from(Instant.now().minusSeconds(120)))
+            .withIssuedAt(Date.from(issuedAt))
+        if (includeLoginContext) {
+            token.withClaim("auth_time", issuedAt.epochSecond)
+                .withClaim("absolute_exp", issuedAt.plusSeconds(86_400).epochSecond)
+        }
         if (expiresAt != null) token.withExpiresAt(Date.from(expiresAt))
         return token.sign(Algorithm.HMAC256(secret))
     }

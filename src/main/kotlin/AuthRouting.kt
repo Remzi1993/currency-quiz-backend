@@ -28,17 +28,7 @@ fun Application.configureAuthRouting(auth: AuthService, tokens: JwtTokens, brows
                         call.invalidCredentials()
                         return@post
                     }
-                    val csrf = tokens.newCsrfToken()
-                    val access = tokens.issueAccess(csrf)
-                    val refresh = tokens.issueRefresh(csrf)
-                    val metadata = browser.metadata(JWT.decode(access), JWT.decode(refresh))
-                    if (metadata == null) {
-                        call.expiredBrowserToken(browser)
-                        return@post
-                    }
-                    call.response.cookies.append(browser.cookie(access))
-                    call.response.cookies.append(browser.cookie(refresh, refresh = true))
-                    call.respond(metadata)
+                    call.respondBrowserTokens(browser, tokens.startLogin())
                 }
             }
             get("/session") {
@@ -64,15 +54,12 @@ fun Application.configureAuthRouting(auth: AuthService, tokens: JwtTokens, brows
                     if (refresh == null) {
                         call.expiredBrowserToken(browser)
                     } else if (call.requireBrowserCsrf(browser, refresh)) {
-                        // Keep the refresh JWT and its original hard deadline. No token registry is needed.
-                        val access = tokens.issueAccess(refresh.getClaim("csrf").asString(), refresh.expiresAtAsInstant)
-                        val metadata = browser.metadata(JWT.decode(access), refresh)
-                        if (metadata == null) {
+                        val issued = tokens.renew(refresh)
+                        if (issued == null) {
                             call.expiredBrowserToken(browser)
                             return@post
                         }
-                        call.response.cookies.append(browser.cookie(access))
-                        call.respond(metadata)
+                        call.respondBrowserTokens(browser, issued)
                     }
                 }
             }
@@ -92,6 +79,17 @@ private suspend fun ApplicationCall.invalidBrowserToken() =
 private suspend fun ApplicationCall.expiredBrowserToken(browser: BrowserTokens) {
     clearBrowserCookies(browser)
     invalidBrowserToken()
+}
+
+private suspend fun ApplicationCall.respondBrowserTokens(browser: BrowserTokens, issued: IssuedTokens) {
+    val metadata = browser.metadata(JWT.decode(issued.accessToken), JWT.decode(issued.refreshToken))
+    if (metadata == null) {
+        expiredBrowserToken(browser)
+        return
+    }
+    response.cookies.append(browser.cookie(issued.accessToken))
+    response.cookies.append(browser.cookie(issued.refreshToken, refresh = true))
+    respond(metadata)
 }
 
 private fun ApplicationCall.clearBrowserCookies(browser: BrowserTokens) {

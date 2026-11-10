@@ -48,29 +48,38 @@ SQL storage is added. CORS does not grant admin permission; knowing a UUID does 
 1. POST /api/v1/auth/session verifies JSON credentials against the salted bcrypt hash, a trusted Origin and the shared login rate limit.
 2. It sets two host-only cookies with HttpOnly, Secure and SameSite=Strict defaults: currency_quiz_admin on /api/v1 and currency_quiz_admin_refresh on /api/v1/auth/session. The refresh cookie is not normally sent to question routes.
 3. Browser requests use credentials: include. GET /api/v1/auth/session returns only username, expiresIn, accessExpiresIn and csrfToken. These values stay in memory; neither authentication JWT appears in JSON.
-4. POST /api/v1/auth/session/refresh verifies the refresh JWT, Origin and CSRF. It issues access within the refresh JWT's original deadline. It does not replace or extend refresh.
+4. POST /api/v1/auth/session/refresh verifies the refresh JWT, Origin and CSRF. It replaces both JWT cookies, preserving the original sign-in deadline and CSRF nonce.
 5. Question writes and logout require an access or applicable refresh JWT, trusted Origin and matching X-CSRF-Token. DELETE /api/v1/auth/session clears both original cookie scopes.
 
-Access defaults to 300 seconds through JWT_TOKEN_TTL_SECONDS. Refresh defaults to 600 seconds from login through
-JWT_REFRESH_TOKEN_TTL_SECONDS. Both settings accept positive integer seconds up to 2147483647; refresh must be at
-least as long as access. Short defaults reduce the exposure window. Increasing them deliberately increases it.
-There is no inactivity timer or activity endpoint. Credentials must be entered again after refresh expires.
+Access defaults to 300 seconds through JWT_TOKEN_TTL_SECONDS. Each refresh JWT defaults to 600 seconds through
+JWT_REFRESH_TOKEN_TTL_SECONDS. JWT_ABSOLUTE_TTL_SECONDS sets the original sign-in limit, defaulting to 86400 seconds
+(24 hours). All three accept positive integer seconds up to 2147483647, with access lifetime no longer than refresh
+and refresh no longer than the absolute limit. Increasing these values deliberately increases the exposure window.
+
+Both JWTs carry signed auth_time and absolute_exp claims. Login establishes these values once; renewal copies them
+unchanged. Each new expiry is the earlier of its configured lifetime and the original absolute deadline. A refresh
+with 20 seconds left therefore issues both JWTs with only 20 seconds remaining. A fresh sign-in is required at the
+absolute deadline, or earlier if the current refresh JWT expires without renewal. There is no activity endpoint or
+separate inactivity timer. Reading metadata issues no tokens and extends no expiry.
 
 JWT verification fixes the signing algorithm and checks issuer, audience, configured subject, admin role, token
-purpose, issue time and expiry. Access and refresh have separate purposes. The CSRF nonce is generated with
+purpose, issue time, expiry and original login deadline. Login claims must be integers in the allowed order and
+within the configured absolute lifetime; older JWTs without these claims require a fresh sign-in. Access and refresh
+have separate purposes. The CSRF nonce is generated with
 SecureRandom and bound to signed claims, so a header cannot substitute for an authentication JWT.
 
 ### Limits of stateless authentication
 
-Logout removes browser cookies; it cannot invalidate a copied JWT. A refresh JWT can be reused until its fixed
+Logout removes browser cookies; it cannot invalidate a copied JWT. A refresh JWT can be reused until its own
 expiry. There is no single-use refresh enforcement, replay detection or individual token revocation. Reissuing a JWT
 would not invalidate its predecessor. These are explicit limits of removing server-side authentication state;
 [OWASP's JWT guidance](https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_Cheat_Sheet.html) discusses revocation,
 and [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html#section-4.14.2) describes stronger refresh-token replay defenses
 that require additional controls. This login API is not an OAuth authorization server.
 
-A copied refresh JWT plus its CSRF value can renew access until the refresh deadline. A renewed access JWT cannot
-outlive that deadline. Rotating the signing key invalidates all JWTs. With the same signing key and configuration,
+A copied refresh JWT plus its CSRF value can renew both credentials before that refresh expires, then continue using
+the replacements until the original absolute deadline. Neither renewed JWT can outlive that deadline. Replacement
+alone does not provide single-use enforcement. Rotating the signing key invalidates all JWTs. With the same signing key and configuration,
 JWTs remain valid across restarts and instances without a shared session store.
 
 BrowserSessions previously held credential digests, CSRF values and timestamps, without client IPs. That registry has
@@ -116,6 +125,11 @@ The boundaries are client-to-API traffic and the API's access to files and secre
 [ServerTest.kt](../../../src/test/kotlin/ServerTest.kt) covers rejected admin requests, invalid tokens and input, rate limits, CORS and errors. [LocalEnvironmentTest.kt](../../../src/test/kotlin/LocalEnvironmentTest.kt) checks precedence and secret-safe parsing errors.
 
 [BrowserSessionTest.kt](../../../src/test/kotlin/BrowserSessionTest.kt) and [StatelessAuthTest.kt](../../../src/test/kotlin/StatelessAuthTest.kt) cover cookie flags and scope, authenticated changes, JWT metadata, CSRF/Origin rejection, expiry and independent-instance authentication. [ApiSettingsTest.kt](../../../src/test/kotlin/ApiSettingsTest.kt) checks lifetime configuration and cookie settings. These backend tests do not verify the browser UI or frontend migration.
+
+[JwtTokensTest.kt](../../../src/test/kotlin/JwtTokensTest.kt) models 144 renewals with a controlled clock and checks
+that the final tokens still expire at the original 24-hour deadline. It also checks malformed login claims and
+renewal beyond the previous refresh expiry. [BrowserTokenExpiryTest.kt](../../../src/test/kotlin/BrowserTokenExpiryTest.kt)
+checks one clock snapshot per issued pair and expiry during request handling. These checks do not need to wait a real day.
 
 I can rerun these checks with:
 

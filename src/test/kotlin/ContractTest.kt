@@ -56,11 +56,11 @@ class ContractTest : FunSpec() {
                     header(CSRF_HEADER, csrf)
                 }
                 check(refreshed, "$sessionPath/refresh", Request.Method.POST, HttpStatusCode.OK)
-                val refreshCookie = login.headers.getAll(HttpHeaders.SetCookie).orEmpty()
-                    .single { it.startsWith("$ADMIN_REFRESH_COOKIE_NAME=") }.substringBefore(';')
+                refreshed.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 2
+                refreshed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 600L
                 val logout = client.delete(sessionPath) {
                     header(HttpHeaders.Origin, "http://localhost:5173")
-                    header(HttpHeaders.Cookie, "${refreshed.cookies()}; $refreshCookie")
+                    header(HttpHeaders.Cookie, refreshed.cookies())
                     header(CSRF_HEADER, csrf)
                 }
                 check(logout, sessionPath, Request.Method.DELETE, HttpStatusCode.NoContent)
