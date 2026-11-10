@@ -34,6 +34,8 @@ class StatelessAuthTest : FunSpec() {
                     Algorithm.HMAC256(SECRET).verify(token)
                     token.getClaim("token_use").asString() shouldBe purpose
                     token.expiresAtAsInstant.epochSecond - token.issuedAtAsInstant.epochSecond shouldBe lifetime
+                    token.getClaim("auth_time").asLong() shouldBe token.issuedAtAsInstant.epochSecond
+                    token.getClaim("absolute_exp").asLong() - token.getClaim("auth_time").asLong() shouldBe 86_400L
                 }
                 response.headers.getAll(HttpHeaders.SetCookie).orEmpty().forEach { cookie ->
                     val lifetime = if (cookie.startsWith("$REFRESH_COOKIE=")) 600 else 300

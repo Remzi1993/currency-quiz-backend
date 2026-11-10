@@ -274,7 +274,7 @@ class BrowserSessionTest : FunSpec() {
             shouldThrow<IllegalArgumentException> { settings(secure = false, sameSite = "None") }
         }
 
-        test("refresh renews access after expiry and keeps the original refresh credential") {
+        test("refresh renews both credentials after access expiry and retains CSRF protection") {
             val clock = MutableClock()
             val configuration = settings()
             withApi(configuration, JwtTokens(configuration, clock)) {
@@ -303,8 +303,9 @@ class BrowserSessionTest : FunSpec() {
                 renewed.status shouldBe HttpStatusCode.OK
                 renewed.headers[HttpHeaders.CacheControl] shouldBe "no-store"
                 renewed.cookie() shouldNotBe access
-                renewed.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 1
-                renewed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 300L
+                renewed.refreshCookie() shouldNotBe refresh
+                renewed.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 2
+                renewed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 600L
                 renewed.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 300L
                 renewed.csrf() shouldBe csrf
                 client.post("/api/v1/questions") {
@@ -315,34 +316,34 @@ class BrowserSessionTest : FunSpec() {
             }
         }
 
-        test("refresh and reads cannot extend the ten minute login deadline") {
+        test("rolling refresh ends at the configured absolute login deadline") {
             val clock = MutableClock()
-            val configuration = settings()
+            val configuration = settings(absoluteSeconds = 1200)
             withApi(configuration, JwtTokens(configuration, clock)) {
-                val login = client.browserLogin()
-                val refresh = login.refreshCookie()
-                val csrf = login.csrf()
-                clock.advance(Duration.ofSeconds(299))
-                val renewed = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
-                renewed.status shouldBe HttpStatusCode.OK
-                renewed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 301L
-                renewed.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 300L
-                clock.advance(Duration.ofSeconds(300))
-                val finalAccess = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
-                finalAccess.status shouldBe HttpStatusCode.OK
-                finalAccess.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 1L
-                finalAccess.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 1L
-                val read = client.get(SESSION_PATH) {
-                    header(HttpHeaders.Cookie, "${finalAccess.cookie()}; $refresh")
+                var latest = client.browserLogin()
+                val csrf = latest.csrf()
+                for ((elapsed, remaining) in listOf(299L to 600L, 300L to 600L, 300L to 301L, 300L to 1L)) {
+                    val previousRefresh = latest.refreshCookie()
+                    clock.advance(Duration.ofSeconds(elapsed))
+                    latest = client.post("$SESSION_PATH/refresh") { browserCredentials(previousRefresh, csrf) }
+                    latest.status shouldBe HttpStatusCode.OK
+                    latest.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 2
+                    latest.refreshCookie() shouldNotBe previousRefresh
+                    latest.csrf() shouldBe csrf
+                    latest.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe remaining
+                    latest.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe minOf(300L, remaining)
                 }
+                val access = latest.cookie()
+                val refresh = latest.refreshCookie()
+                val read = client.get(SESSION_PATH) { header(HttpHeaders.Cookie, "$access; $refresh") }
                 read.status shouldBe HttpStatusCode.OK
                 read.headers[HttpHeaders.SetCookie].shouldBeNull()
                 clock.advance(Duration.ofSeconds(1))
                 client.get(SESSION_PATH) {
-                    header(HttpHeaders.Cookie, "${finalAccess.cookie()}; $refresh")
+                    header(HttpHeaders.Cookie, "$access; $refresh")
                 }.status shouldBe HttpStatusCode.Unauthorized
                 client.post("/api/v1/questions") {
-                    browserCredentials(finalAccess.cookie(), csrf); jsonBody(QUESTION)
+                    browserCredentials(access, csrf); jsonBody(QUESTION)
                 }.status shouldBe HttpStatusCode.Unauthorized
                 val expired = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
                 expired.status shouldBe HttpStatusCode.Unauthorized
@@ -353,6 +354,24 @@ class BrowserSessionTest : FunSpec() {
             }
         }
 
+        test("reads cannot keep an unused refresh token alive beyond ten minutes") {
+            val clock = MutableClock()
+            val configuration = settings()
+            withApi(configuration, JwtTokens(configuration, clock)) {
+                val login = client.browserLogin()
+                val refresh = login.refreshCookie()
+                val csrf = login.csrf()
+                clock.advance(Duration.ofSeconds(599))
+                val read = client.get(SESSION_PATH) { header(HttpHeaders.Cookie, refresh) }
+                read.status shouldBe HttpStatusCode.OK
+                read.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 1L
+                read.headers[HttpHeaders.SetCookie].shouldBeNull()
+                clock.advance(Duration.ofSeconds(1))
+                client.post("$SESSION_PATH/refresh") {
+                    browserCredentials(refresh, csrf)
+                }.status shouldBe HttpStatusCode.Unauthorized
+            }
+        }
         test("refresh requires its own JWT and trusted CSRF protected requests") {
             withApi {
                 val login = client.browserLogin()
@@ -418,11 +437,12 @@ class BrowserSessionTest : FunSpec() {
         } finally { directory.toFile().deleteRecursively() }
     }
 
-    private fun settings(ttl: Long = 300, secure: Boolean = true, sameSite: String = "Strict") = ApiSettings(
+    private fun settings(ttl: Long = 300, secure: Boolean = true, sameSite: String = "Strict", absoluteSeconds: Long = 86_400) = ApiSettings(
         adminUsername = USERNAME,
         adminPasswordHash = testPasswordHash(PASSWORD),
         jwtSecret = "test-signing-key-with-at-least-thirty-two-bytes",
         tokenTtlSeconds = ttl,
+        absoluteTokenTtlSeconds = absoluteSeconds,
         allowedOrigins = listOf("*"),
         adminAllowedOrigins = listOf(ORIGIN),
         authCookieSecure = secure,
