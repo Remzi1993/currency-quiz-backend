@@ -39,7 +39,7 @@ class AuthServiceTest : FunSpec({
     }
 
     context("issued tokens honor the configured lifetime boundaries") {
-        withTests(mapOf("one second" to 1L, "five minutes" to 300L)) { lifetime ->
+        withTests(mapOf("one second" to 1L, "five minutes" to 300L, "custom fifteen minutes" to 900L)) { lifetime ->
             val settings = authSettings(lifetime)
             val before = Instant.now().epochSecond
             val response = AuthService(settings).login(AUTH_USERNAME, AUTH_PASSWORD).shouldNotBeNull()
@@ -49,10 +49,12 @@ class AuthServiceTest : FunSpec({
             // Verify the signature directly so the one-second boundary never depends on execution speed.
             Algorithm.HMAC256(settings.jwtSecret).verify(decoded)
             decoded.algorithm shouldBe "HS256"
+            decoded.type shouldBe "at+jwt"
             decoded.issuer shouldBe settings.jwtIssuer
             decoded.audience.shouldContainExactly(settings.jwtAudience)
             decoded.subject shouldBe AUTH_USERNAME
             decoded.getClaim("role").asString() shouldBe "admin"
+            decoded.getClaim("token_use").asString() shouldBe "access"
             decoded.issuedAtAsInstant.epochSecond.let { it in before..after } shouldBe true
             decoded.expiresAtAsInstant.epochSecond - decoded.issuedAtAsInstant.epochSecond shouldBe lifetime
             response.expiresIn shouldBe lifetime
@@ -75,12 +77,25 @@ class AuthServiceTest : FunSpec({
     test("UTF-8 credentials authenticate without normalizing distinct strings") {
         val username = "administratör"
         val password = "réservé-password-123"
-        val auth = AuthService(ApiSettings(username, password, AUTH_SECRET))
+        val auth = AuthService(ApiSettings(username, testPasswordHash(password), AUTH_SECRET))
 
         auth.authenticates(username, password) shouldBe true
         auth.authenticates("administrator", password) shouldBe false
         auth.authenticates(username, "re\u0301serve\u0301-password-123") shouldBe false
         JWT.decode(auth.login(username, password).shouldNotBeNull().accessToken).subject shouldBe username
+    }
+
+    test("long passwords cannot authenticate by matching a truncated bcrypt prefix") {
+        val password = "é".repeat(36)
+        val auth = AuthService(ApiSettings(AUTH_USERNAME, testPasswordHash(password), AUTH_SECRET))
+
+        auth.authenticates(AUTH_USERNAME, password) shouldBe true
+        auth.authenticates(AUTH_USERNAME, password + "a") shouldBe false
+        auth.login(AUTH_USERNAME, password + "a").shouldBeNull()
+    }
+
+    test("a plaintext password cannot be configured as a stored password hash") {
+        shouldThrow<IllegalArgumentException> { ApiSettings(AUTH_USERNAME, AUTH_PASSWORD, AUTH_SECRET) }
     }
 })
 
@@ -88,11 +103,12 @@ private data class CredentialCase(val username: String, val password: String, va
 
 private fun authSettings(lifetime: Long = 300) = ApiSettings(
     adminUsername = AUTH_USERNAME,
-    adminPassword = AUTH_PASSWORD,
+    adminPasswordHash = testPasswordHash(AUTH_PASSWORD),
     jwtSecret = AUTH_SECRET,
     jwtIssuer = "unit-test-issuer",
     jwtAudience = "unit-test-admin-audience",
     tokenTtlSeconds = lifetime,
+    refreshTokenTtlSeconds = maxOf(600, lifetime),
 )
 
 private const val AUTH_USERNAME = "test-admin"

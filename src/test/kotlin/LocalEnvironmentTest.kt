@@ -16,13 +16,12 @@ class LocalEnvironmentTest : FunSpec() {
                 Files.writeString(directory.resolve(".env"), """
                     # Development settings
                     ADMIN_USERNAME="local-admin"
-                    ADMIN_PASSWORD="a password with # inside"
+                    ADMIN_PASSWORD_HASH="a hash with # inside"
                     JWT_SECRET="a-local-signing-secret-with-at-least-32-bytes"
                     JWT_ISSUER=local-issuer
                     JWT_AUDIENCE=local-audience
                     JWT_TOKEN_TTL_SECONDS=300
-                    ADMIN_SESSION_IDLE_SECONDS=900
-                    ADMIN_SESSION_ABSOLUTE_SECONDS=1800
+                    JWT_REFRESH_TOKEN_TTL_SECONDS=600
                     CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
                     ADMIN_CORS_ALLOWED_ORIGINS="http://localhost:5173,https://quiz.example"
                     AUTH_COOKIE_SECURE=false
@@ -36,13 +35,12 @@ class LocalEnvironmentTest : FunSpec() {
 
                 properties.toMap() shouldBe mapOf(
                     "ADMIN_USERNAME" to "local-admin",
-                    "ADMIN_PASSWORD" to "a password with # inside",
+                    "ADMIN_PASSWORD_HASH" to "a hash with # inside",
                     "JWT_SECRET" to "a-local-signing-secret-with-at-least-32-bytes",
                     "JWT_ISSUER" to "local-issuer",
                     "JWT_AUDIENCE" to "local-audience",
                     "JWT_TOKEN_TTL_SECONDS" to "300",
-                    "ADMIN_SESSION_IDLE_SECONDS" to "900",
-                    "ADMIN_SESSION_ABSOLUTE_SECONDS" to "1800",
+                    "JWT_REFRESH_TOKEN_TTL_SECONDS" to "600",
                     "CORS_ALLOWED_ORIGINS" to "http://localhost:5173,https://quiz.example",
                     "ADMIN_CORS_ALLOWED_ORIGINS" to "http://localhost:5173,https://quiz.example",
                     "AUTH_COOKIE_SECURE" to "false",
@@ -57,12 +55,12 @@ class LocalEnvironmentTest : FunSpec() {
             withDirectory { directory ->
                 Files.writeString(directory.resolve(".env"), """
                     ADMIN_USERNAME=local-admin
-                    ADMIN_PASSWORD=local-password
+                    ADMIN_PASSWORD_HASH=local-password
                     JWT_SECRET=local-secret
                     PORT=9090
                     JWT_AUDIENCE=local-audience
                 """.trimIndent())
-                val environment = mapOf("ADMIN_USERNAME" to "deployed-admin", "ADMIN_PASSWORD" to "")
+                val environment = mapOf("ADMIN_USERNAME" to "deployed-admin", "ADMIN_PASSWORD_HASH" to "")
                 val properties = Properties().apply {
                     setProperty("JWT_SECRET", "existing-jvm-secret")
                     setProperty("PORT", "")
@@ -71,13 +69,38 @@ class LocalEnvironmentTest : FunSpec() {
                 loadLocalEnvironment(directory, environment, properties)
 
                 properties.getProperty("ADMIN_USERNAME").shouldBeNull()
-                properties.getProperty("ADMIN_PASSWORD").shouldBeNull()
+                properties.getProperty("ADMIN_PASSWORD_HASH").shouldBeNull()
                 properties.toMap() shouldBe mapOf(
                     "JWT_SECRET" to "existing-jvm-secret",
                     "PORT" to "",
                     "JWT_AUDIENCE" to "local-audience",
                 )
-                environment shouldBe mapOf("ADMIN_USERNAME" to "deployed-admin", "ADMIN_PASSWORD" to "")
+                environment shouldBe mapOf("ADMIN_USERNAME" to "deployed-admin", "ADMIN_PASSWORD_HASH" to "")
+            }
+        }
+
+        test("bcrypt dollar separators survive unquoted and quoted dotenv values unchanged") {
+            val hash = testPasswordHash("dotenv-test-password-123")
+            for (quote in listOf("", "'", "\"")) {
+                withDirectory { directory ->
+                    Files.writeString(directory.resolve(".env"), "ADMIN_PASSWORD_HASH=$quote$hash$quote")
+                    val properties = Properties()
+
+                    loadLocalEnvironment(directory, emptyMap(), properties)
+
+                    properties.getProperty("ADMIN_PASSWORD_HASH") shouldBe hash
+                }
+            }
+        }
+
+        test("literal apostrophes in other double-quoted settings are preserved") {
+            withDirectory { directory ->
+                Files.writeString(directory.resolve(".env"), """JWT_SECRET="'literal-signing-secret-with-at-least-thirty-two-bytes'"""")
+                val properties = Properties()
+
+                loadLocalEnvironment(directory, emptyMap(), properties)
+
+                properties.getProperty("JWT_SECRET") shouldBe "'literal-signing-secret-with-at-least-thirty-two-bytes'"
             }
         }
 
@@ -98,6 +121,9 @@ class LocalEnvironmentTest : FunSpec() {
                     user.home=/invalid-home
                     JAVA_TOOL_OPTIONS=-javaagent:untrusted.jar
                     UNRELATED_SECRET=do-not-import
+                    ADMIN_PASSWORD=legacy-plaintext-password
+                    ADMIN_SESSION_IDLE_SECONDS=900
+                    ADMIN_SESSION_ABSOLUTE_SECONDS=1800
                     PORT=9090
                 """.trimIndent())
                 val properties = Properties().apply { setProperty("user.home", "existing-home") }

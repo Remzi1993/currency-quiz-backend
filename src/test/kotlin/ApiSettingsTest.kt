@@ -9,12 +9,11 @@ import io.ktor.server.config.MapApplicationConfig
 
 class ApiSettingsTest : FunSpec() {
     init {
-        test("defaults use bounded lifetimes and require explicit browser origins") {
+        test("defaults use five and ten minute lifetimes and require explicit browser origins") {
             val settings = ApiSettings.from(config())
 
             settings.tokenTtlSeconds shouldBe 300L
-            settings.sessionIdleSeconds shouldBe 900L
-            settings.sessionAbsoluteSeconds shouldBe 1800L
+            settings.refreshTokenTtlSeconds shouldBe 600L
             settings.allowedOrigins shouldBe emptyList()
             settings.adminAllowedOrigins shouldBe emptyList()
             settings.authCookieSecure shouldBe true
@@ -27,13 +26,13 @@ class ApiSettingsTest : FunSpec() {
         context("invalid security lifetimes") {
             withTests(
                 nameFn = { (key, value) -> "$key rejects $value" },
-                "security.tokenTtlSeconds" to "301",
+                "security.tokenTtlSeconds" to "2147483648",
                 "security.tokenTtlSeconds" to "0",
                 "security.tokenTtlSeconds" to "-1",
-                "security.sessionIdleSeconds" to "901",
-                "security.sessionIdleSeconds" to "299",
-                "security.sessionAbsoluteSeconds" to "1801",
-                "security.sessionAbsoluteSeconds" to "899",
+                "security.refreshTokenTtlSeconds" to "2147483648",
+                "security.refreshTokenTtlSeconds" to "299",
+                "security.refreshTokenTtlSeconds" to "0",
+                "security.refreshTokenTtlSeconds" to "-1",
             ) { (key, value) ->
                 shouldThrow<IllegalArgumentException> { ApiSettings.from(config().apply { put(key, value) }) }
             }
@@ -42,7 +41,7 @@ class ApiSettingsTest : FunSpec() {
         context("integer configuration must be parseable without overflow") {
             withTests(
                 nameFn = { (key, value) -> "$key rejects '$value'" },
-                listOf("security.tokenTtlSeconds", "security.sessionIdleSeconds", "security.sessionAbsoluteSeconds")
+                listOf("security.tokenTtlSeconds", "security.refreshTokenTtlSeconds")
                     .flatMap { key -> listOf("", "1.5", "seconds", "9223372036854775808").map { key to it } },
             ) { (key, value) ->
                 shouldThrow<IllegalStateException> {
@@ -52,23 +51,21 @@ class ApiSettingsTest : FunSpec() {
         }
 
         test("minimum and maximum lifetime boundaries are accepted") {
-            for (seconds in listOf(1L, 300L)) {
+            for (seconds in listOf(1L, 300L, Int.MAX_VALUE.toLong())) {
                 val settings = ApiSettings.from(config().apply {
                     put("security.tokenTtlSeconds", "$seconds")
-                    put("security.sessionIdleSeconds", "$seconds")
-                    put("security.sessionAbsoluteSeconds", "$seconds")
+                    put("security.refreshTokenTtlSeconds", "$seconds")
                 })
 
                 settings.tokenTtlSeconds shouldBe seconds
-                settings.sessionIdleSeconds shouldBe seconds
-                settings.sessionAbsoluteSeconds shouldBe seconds
+                settings.refreshTokenTtlSeconds shouldBe seconds
             }
         }
 
         context("required credentials cannot be missing or blank") {
             withTests(
                 nameFn = { it },
-                listOf("security.adminUsername", "security.adminPassword", "security.jwtSecret"),
+                listOf("security.adminUsername", "security.adminPasswordHash", "security.jwtSecret"),
             ) { missingKey ->
                 val missing = MapApplicationConfig().apply {
                     for ((key, value) in requiredSettings) if (key != missingKey) put(key, value)
@@ -85,8 +82,8 @@ class ApiSettingsTest : FunSpec() {
             withTests(
                 nameFn = { (key, value) -> "$key rejects length ${value.length}" },
                 "security.adminUsername" to "u".repeat(101),
-                "security.adminPassword" to "p".repeat(11),
-                "security.adminPassword" to "p".repeat(1025),
+                "security.adminPasswordHash" to "plaintext-password-123",
+                "security.adminPasswordHash" to "p".repeat(60),
                 "security.jwtSecret" to "s".repeat(31),
             ) { (key, value) ->
                 shouldThrow<IllegalArgumentException> { ApiSettings.from(config().apply { put(key, value) }) }
@@ -94,14 +91,13 @@ class ApiSettingsTest : FunSpec() {
         }
 
         test("credential boundaries and UTF-8 secret byte length are accepted") {
-            for ((username, password) in listOf("u" to "p".repeat(12), "u".repeat(100) to "p".repeat(1024))) {
+            for (username in listOf("u", "u".repeat(100))) {
                 val settings = ApiSettings.from(config().apply {
                     put("security.adminUsername", username)
-                    put("security.adminPassword", password)
                     put("security.jwtSecret", "é".repeat(16))
                 })
                 settings.adminUsername shouldBe username
-                settings.adminPassword shouldBe password
+                settings.adminPasswordHash shouldBe testPasswordHash("test-admin-password-123")
                 settings.jwtSecret.toByteArray(Charsets.UTF_8).size shouldBe 32
             }
         }
@@ -112,11 +108,36 @@ class ApiSettingsTest : FunSpec() {
             }
         }
 
+        test("plaintext legacy credentials cannot replace a required bcrypt hash") {
+            val plaintext = MapApplicationConfig(
+                "security.adminUsername" to "test-admin",
+                "security.adminPassword" to "plaintext-password-123",
+                "security.jwtSecret" to "test-signing-key-with-at-least-thirty-two-bytes",
+            )
+
+            shouldThrow<IllegalStateException> { ApiSettings.from(plaintext) }.message shouldBe
+                "Missing required configuration: security.adminPasswordHash"
+        }
+
+        context("blank credentials and signing keys fail direct construction") {
+            withTests(nameFn = { if (it.isEmpty()) "empty" else "whitespace" }, "", " ") { value ->
+                shouldThrow<IllegalArgumentException> {
+                    ApiSettings(value, testPasswordHash("test-admin-password-123"), "s".repeat(32))
+                }
+                shouldThrow<IllegalArgumentException> {
+                    ApiSettings("test-admin", value, "s".repeat(32))
+                }
+                shouldThrow<IllegalArgumentException> {
+                    ApiSettings("test-admin", testPasswordHash("test-admin-password-123"), value)
+                }
+            }
+        }
+
         test("settings string representation never exposes credentials or signing key") {
             val settings = ApiSettings.from(config())
 
             settings.toString() shouldNotContain settings.adminUsername
-            settings.toString() shouldNotContain settings.adminPassword
+            settings.toString() shouldNotContain settings.adminPasswordHash
             settings.toString() shouldNotContain settings.jwtSecret
         }
 
@@ -195,7 +216,7 @@ class ApiSettingsTest : FunSpec() {
 
     private val requiredSettings = listOf(
         "security.adminUsername" to "test-admin",
-        "security.adminPassword" to "test-admin-password-123",
+        "security.adminPasswordHash" to testPasswordHash("test-admin-password-123"),
         "security.jwtSecret" to "test-signing-key-with-at-least-thirty-two-bytes",
     )
 
@@ -205,7 +226,7 @@ class ApiSettingsTest : FunSpec() {
 
     private fun settings(origins: List<String>) = ApiSettings(
         adminUsername = "test-admin",
-        adminPassword = "test-admin-password-123",
+        adminPasswordHash = testPasswordHash("test-admin-password-123"),
         jwtSecret = "test-signing-key-with-at-least-thirty-two-bytes",
         allowedOrigins = origins,
     )

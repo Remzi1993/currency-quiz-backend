@@ -26,21 +26,20 @@ import kotlinx.serialization.json.*
 
 class BrowserSessionTest : FunSpec() {
     init {
-        test("browser session cookie supports restore CRUD and revoked logout without exposing credentials") {
+        test("browser JWT cookies support restore CRUD and logout without exposing credentials") {
             withApi {
                 val login = client.browserLogin()
                 withClue(login.bodyAsText()) { login.status shouldBe HttpStatusCode.OK }
                 login.headers[HttpHeaders.CacheControl] shouldBe "no-store"
                 val body = login.json().jsonObject
-                body.keys shouldBe setOf("username", "expiresIn", "accessExpiresIn", "absoluteExpiresIn", "csrfToken")
+                body.keys shouldBe setOf("username", "expiresIn", "accessExpiresIn", "csrfToken")
                 body.getValue("username").jsonPrimitive.content shouldBe USERNAME
-                body.getValue("expiresIn").jsonPrimitive.long shouldBe 900L
+                body.getValue("expiresIn").jsonPrimitive.long shouldBe 600L
                 body.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 300L
-                body.getValue("absoluteExpiresIn").jsonPrimitive.long shouldBe 1800L
                 val csrf = body.getValue("csrfToken").jsonPrimitive.content
                 Regex("^[A-Za-z0-9_-]{43}$").matches(csrf) shouldBe true
                 val cookie = login.cookie()
-                Regex("^currency_quiz_admin=[A-Za-z0-9_-]{43}$").matches(cookie) shouldBe true
+                cookie.substringAfter('=').split('.').size shouldBe 3
                 assertCookieFlags(login, secure = true)
                 login.bodyAsText().contains(cookie.substringAfter('=')) shouldBe false
                 login.bodyAsText().contains(PASSWORD) shouldBe false
@@ -76,11 +75,6 @@ class BrowserSessionTest : FunSpec() {
                 logout.bodyAsText() shouldBe ""
                 assertCookieFlags(logout, secure = true, clearing = true)
                 logout.headers[HttpHeaders.CacheControl] shouldBe "no-store"
-                client.get(SESSION_PATH) { header(HttpHeaders.Cookie, cookie) }.status shouldBe HttpStatusCode.Unauthorized
-                withClue("An old cookie must stay revoked even if manually replayed") { client.post("/api/v1/questions") {
-                    browserCredentials(cookie, csrf)
-                    jsonBody(QUESTION)
-                }.status shouldBe HttpStatusCode.Unauthorized }
             }
         }
 
@@ -145,11 +139,11 @@ class BrowserSessionTest : FunSpec() {
             }
         }
 
-        test("missing forged expired or restarted sessions cannot authenticate") {
+        test("missing forged or expired access JWTs cannot authenticate") {
             val clock = MutableClock()
             val settings = settings(ttl = 2)
-            val sessions = BrowserSessions(settings, clock)
-            withApi(settings, sessions) {
+            val tokens = JwtTokens(settings, clock)
+            withApi(settings, tokens) {
                 val login = client.browserLogin()
                 val cookie = login.cookie()
                 val csrf = login.csrf()
@@ -169,7 +163,6 @@ class BrowserSessionTest : FunSpec() {
                 val expiredLogout = client.delete(SESSION_PATH) { browserCredentials(cookie, csrf) }
                 expiredLogout.status shouldBe HttpStatusCode.Unauthorized
                 assertCookieFlags(expiredLogout, secure = true, clearing = true)
-                withClue("A new process/store cannot restore old sessions") { BrowserSessions(settings, clock).find(cookie.substringAfter('=')).shouldBeNull() }
             }
         }
 
@@ -192,7 +185,7 @@ class BrowserSessionTest : FunSpec() {
             }
         }
 
-        test("relogin rotates session and CSRF and revokes replaced cookie") {
+        test("relogin issues independent credentials and CSRF without retaining old credentials") {
             withApi {
                 val first = client.browserLogin()
                 val second = client.post(SESSION_PATH) {
@@ -203,26 +196,9 @@ class BrowserSessionTest : FunSpec() {
                 second.status shouldBe HttpStatusCode.OK
                 second.cookie() shouldNotBe first.cookie()
                 second.csrf() shouldNotBe first.csrf()
-                client.get(SESSION_PATH) { header(HttpHeaders.Cookie, first.cookie()) }.status shouldBe HttpStatusCode.Unauthorized
+                client.get(SESSION_PATH) { header(HttpHeaders.Cookie, first.cookie()) }.status shouldBe HttpStatusCode.OK
                 client.get(SESSION_PATH) { header(HttpHeaders.Cookie, second.cookie()) }.status shouldBe HttpStatusCode.OK
             }
-        }
-
-        test("bounded session store evicts oldest sessions and cleans expired entries") {
-            val clock = MutableClock()
-            val settings = settings(ttl = 5)
-            val sessions = BrowserSessions(settings, clock, maximumSessions = 2)
-            val first = sessions.create()
-            val second = sessions.create()
-            sessions.find(first.cookieValue).shouldNotBeNull()
-            val third = sessions.create()
-            sessions.find(first.cookieValue).shouldBeNull()
-            sessions.find(second.cookieValue).shouldNotBeNull()
-            sessions.find(third.cookieValue).shouldNotBeNull()
-            clock.advance(Duration.ofSeconds(5))
-            sessions.find(second.cookieValue).shouldBeNull()
-            sessions.find(third.cookieValue).shouldBeNull()
-            sessions.find(sessions.create().cookieValue).shouldNotBeNull()
         }
 
         test("only explicit admin origins receive credentialed CORS while public wildcard remains public") {
@@ -298,10 +274,10 @@ class BrowserSessionTest : FunSpec() {
             shouldThrow<IllegalArgumentException> { settings(secure = false, sameSite = "None") }
         }
 
-        test("refresh rotates both credentials and replay revokes the family") {
+        test("refresh renews access after expiry and keeps the original refresh credential") {
             val clock = MutableClock()
             val configuration = settings()
-            withApi(configuration, BrowserSessions(configuration, clock)) {
+            withApi(configuration, JwtTokens(configuration, clock)) {
                 val login = client.browserLogin()
                 val access = login.cookie()
                 val refresh = login.refreshCookie()
@@ -311,6 +287,7 @@ class BrowserSessionTest : FunSpec() {
                 refreshAttributes.shouldContain("secure")
                 refreshAttributes.shouldContain("path=/api/v1/auth/session")
                 refreshAttributes.shouldContain("samesite=strict")
+                refreshAttributes.shouldContain("max-age=600")
                 clock.advance(Duration.ofSeconds(300))
                 client.post("/api/v1/questions") {
                     browserCredentials(access, csrf); jsonBody(QUESTION)
@@ -318,72 +295,97 @@ class BrowserSessionTest : FunSpec() {
                 val read = client.get(SESSION_PATH) { header(HttpHeaders.Cookie, refresh) }
                 read.status shouldBe HttpStatusCode.OK
                 read.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 0L
+                read.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 300L
+                read.headers[HttpHeaders.SetCookie].shouldBeNull()
                 val denied = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, "b".repeat(43)) }
                 denied.status shouldBe HttpStatusCode.Forbidden
-                val rotated = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
-                rotated.status shouldBe HttpStatusCode.OK
-                rotated.headers[HttpHeaders.CacheControl] shouldBe "no-store"
-                rotated.cookie() shouldNotBe access
-                rotated.refreshCookie() shouldNotBe refresh
-                withClue("Refresh must not reset idle expiry") { rotated.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 600L }
-                client.post("$SESSION_PATH/activity") { browserCredentials(rotated.cookie(), csrf) }.status shouldBe HttpStatusCode.OK
-                val replay = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
-                replay.status shouldBe HttpStatusCode.Unauthorized
-                client.get(SESSION_PATH) { header(HttpHeaders.Cookie, rotated.refreshCookie()) }.status shouldBe HttpStatusCode.Unauthorized
+                val renewed = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
+                renewed.status shouldBe HttpStatusCode.OK
+                renewed.headers[HttpHeaders.CacheControl] shouldBe "no-store"
+                renewed.cookie() shouldNotBe access
+                renewed.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 1
+                renewed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 300L
+                renewed.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 300L
+                renewed.csrf() shouldBe csrf
                 client.post("/api/v1/questions") {
-                    browserCredentials(rotated.cookie(), csrf); jsonBody(QUESTION)
-                }.status shouldBe HttpStatusCode.Unauthorized
+                    browserCredentials(renewed.cookie(), csrf); jsonBody(QUESTION)
+                }.status shouldBe HttpStatusCode.Created
+                // There is no server registry to mark refresh JWTs as spent.
+                client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }.status shouldBe HttpStatusCode.OK
             }
         }
 
-        test("refresh and reads cannot extend fifteen minute idle deadline") {
+        test("refresh and reads cannot extend the ten minute login deadline") {
             val clock = MutableClock()
-            val sessions = BrowserSessions(settings(), clock)
-            var issued = sessions.create()
-            repeat(3) {
+            val configuration = settings()
+            withApi(configuration, JwtTokens(configuration, clock)) {
+                val login = client.browserLogin()
+                val refresh = login.refreshCookie()
+                val csrf = login.csrf()
                 clock.advance(Duration.ofSeconds(299))
-                sessions.findRefresh(issued.refreshValue).shouldNotBeNull()
-                issued = sessions.rotate(issued.refreshValue).shouldNotBeNull()
+                val renewed = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
+                renewed.status shouldBe HttpStatusCode.OK
+                renewed.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 301L
+                renewed.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 300L
+                clock.advance(Duration.ofSeconds(300))
+                val finalAccess = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
+                finalAccess.status shouldBe HttpStatusCode.OK
+                finalAccess.json().jsonObject.getValue("expiresIn").jsonPrimitive.long shouldBe 1L
+                finalAccess.json().jsonObject.getValue("accessExpiresIn").jsonPrimitive.long shouldBe 1L
+                val read = client.get(SESSION_PATH) {
+                    header(HttpHeaders.Cookie, "${finalAccess.cookie()}; $refresh")
+                }
+                read.status shouldBe HttpStatusCode.OK
+                read.headers[HttpHeaders.SetCookie].shouldBeNull()
+                clock.advance(Duration.ofSeconds(1))
+                client.get(SESSION_PATH) {
+                    header(HttpHeaders.Cookie, "${finalAccess.cookie()}; $refresh")
+                }.status shouldBe HttpStatusCode.Unauthorized
+                client.post("/api/v1/questions") {
+                    browserCredentials(finalAccess.cookie(), csrf); jsonBody(QUESTION)
+                }.status shouldBe HttpStatusCode.Unauthorized
+                val expired = client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }
+                expired.status shouldBe HttpStatusCode.Unauthorized
+                expired.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 2
+                expired.headers.getAll(HttpHeaders.SetCookie).orEmpty().forEach {
+                    it.lowercase().shouldContain("max-age=0")
+                }
             }
-            sessions.response(issued.session).expiresIn shouldBe 3L
-            clock.advance(Duration.ofSeconds(3))
-            sessions.find(issued.cookieValue).shouldBeNull()
-            sessions.findRefresh(issued.refreshValue).shouldBeNull()
-            sessions.rotate(issued.refreshValue).shouldBeNull()
         }
 
-        test("activity resets idle expiry but never the thirty minute absolute deadline") {
-            val clock = MutableClock()
-            val sessions = BrowserSessions(settings(), clock)
-            var issued = sessions.create()
-            repeat(7) {
-                clock.advance(Duration.ofSeconds(240))
-                issued = sessions.rotate(issued.refreshValue).shouldNotBeNull()
-                sessions.recordActivity(issued.session) shouldBe true
-            }
-            sessions.response(issued.session).expiresIn shouldBe 120L
-            sessions.response(issued.session).absoluteExpiresIn shouldBe 120L
-            clock.advance(Duration.ofSeconds(120))
-            sessions.find(issued.cookieValue).shouldBeNull()
-            sessions.findRefresh(issued.refreshValue).shouldBeNull()
-            sessions.recordActivity(issued.session) shouldBe false
-        }
-
-        test("refresh alone never grants question access and logout revokes both tokens") {
+        test("refresh requires its own JWT and trusted CSRF protected requests") {
             withApi {
                 val login = client.browserLogin()
                 val refresh = login.refreshCookie()
                 val csrf = login.csrf()
-                client.post("/api/v1/questions") {
-                    browserCredentials(refresh, csrf); jsonBody(QUESTION)
-                }.status shouldBe HttpStatusCode.Unauthorized
-                client.post("$SESSION_PATH/activity") { browserCredentials(refresh, csrf) }.status shouldBe HttpStatusCode.Unauthorized
-                client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf, null) }.status shouldBe HttpStatusCode.Forbidden
+                for (cookie in listOf(null, login.cookie(), "$ADMIN_REFRESH_COOKIE_NAME=invalid-jwt")) {
+                    client.post("$SESSION_PATH/refresh") {
+                        browserCredentials(cookie, csrf)
+                    }.status shouldBe HttpStatusCode.Unauthorized
+                }
+                client.post("$SESSION_PATH/refresh") {
+                    browserCredentials(refresh, csrf, null)
+                }.status shouldBe HttpStatusCode.Forbidden
+                client.post("$SESSION_PATH/refresh") {
+                    browserCredentials(refresh, null)
+                }.status shouldBe HttpStatusCode.Forbidden
+                client.post("$SESSION_PATH/refresh") {
+                    browserCredentials(refresh, csrf)
+                    header(CSRF_HEADER, csrf)
+                }.status shouldBe HttpStatusCode.Forbidden
+                client.post("$SESSION_PATH/refresh") {
+                    browserCredentials(refresh, csrf)
+                    header(HttpHeaders.Origin, ORIGIN)
+                }.status shouldBe HttpStatusCode.Forbidden
                 val logout = client.delete(SESSION_PATH) { browserCredentials(refresh, csrf) }
                 logout.status shouldBe HttpStatusCode.NoContent
                 logout.headers.getAll(HttpHeaders.SetCookie).orEmpty().size shouldBe 2
-                logout.headers.getAll(HttpHeaders.SetCookie).orEmpty().forEach { it.lowercase().shouldContain("max-age=0") }
-                client.post("$SESSION_PATH/refresh") { browserCredentials(refresh, csrf) }.status shouldBe HttpStatusCode.Unauthorized
+                logout.headers.getAll(HttpHeaders.SetCookie).orEmpty().forEach {
+                    it.lowercase().shouldContain("max-age=0")
+                }
+                client.post("$SESSION_PATH/activity") {
+                    browserCredentials(login.cookie(), csrf)
+                }.status shouldBe HttpStatusCode.NotFound
             }
         }
     }
@@ -401,7 +403,7 @@ class BrowserSessionTest : FunSpec() {
 
     private fun withApi(
         settings: ApiSettings = settings(),
-        sessions: BrowserSessions = BrowserSessions(settings),
+        tokens: JwtTokens = JwtTokens(settings),
         block: suspend ApplicationTestBuilder.() -> Unit,
     ) {
         val directory = Files.createTempDirectory("currencyquiz-browser-session-test-")
@@ -410,7 +412,7 @@ class BrowserSessionTest : FunSpec() {
             Files.writeString(storage, "[]")
             testApplication {
                 environment { config = MapApplicationConfig() }
-                application { quizModule(settings, FileQuestionRepository(storage), sessions) }
+                application { quizModule(settings, FileQuestionRepository(storage), tokens) }
                 block()
             }
         } finally { directory.toFile().deleteRecursively() }
@@ -418,7 +420,7 @@ class BrowserSessionTest : FunSpec() {
 
     private fun settings(ttl: Long = 300, secure: Boolean = true, sameSite: String = "Strict") = ApiSettings(
         adminUsername = USERNAME,
-        adminPassword = PASSWORD,
+        adminPasswordHash = testPasswordHash(PASSWORD),
         jwtSecret = "test-signing-key-with-at-least-thirty-two-bytes",
         tokenTtlSeconds = ttl,
         allowedOrigins = listOf("*"),

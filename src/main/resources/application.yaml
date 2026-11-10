@@ -8,7 +8,7 @@ ktor:
 
 security:
   adminUsername: "${ADMIN_USERNAME:}"
-  adminPassword: "${ADMIN_PASSWORD:}"
+  adminPasswordHash: "${ADMIN_PASSWORD_HASH:}"
   jwtSecret: "${JWT_SECRET:}"
   jwtIssuer: "${JWT_ISSUER:currencyquiz-api}"
   jwtAudience: "${JWT_AUDIENCE:currencyquiz-admin}"
@@ -16,8 +16,7 @@ security:
   adminAllowedOrigins: "${ADMIN_CORS_ALLOWED_ORIGINS:}"
   authCookieSecure: "${AUTH_COOKIE_SECURE:true}"
   authCookieSameSite: "${AUTH_COOKIE_SAME_SITE:Strict}"
-  sessionIdleSeconds: "${ADMIN_SESSION_IDLE_SECONDS:900}"
-  sessionAbsoluteSeconds: "${ADMIN_SESSION_ABSOLUTE_SECONDS:1800}"
+  refreshTokenTtlSeconds: "${JWT_REFRESH_TOKEN_TTL_SECONDS:600}"
 cors:
   allowedOrigins: "${CORS_ALLOWED_ORIGINS:}"
 storage:

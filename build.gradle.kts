@@ -108,7 +108,17 @@ tasks.processResources {
     from(contractFile) { rename { "documentation.yaml" } }
 }
 
+// Pipe a password from a hidden shell prompt; only the salted hash is printed.
+tasks.register<JavaExec>("hashAdminPassword") {
+    group = "application"
+    description = "Generate a bcrypt administrator password hash from standard input"
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("info.remzi.currencyquiz.PasswordHashKt")
+    standardInput = System.`in`
+}
+
 dependencies {
+    implementation(libs.bcrypt)
     implementation(libs.dotenv.kotlin)
     implementation(ktorLibs.serialization.kotlinx.json)
     implementation(ktorLibs.server.auth)

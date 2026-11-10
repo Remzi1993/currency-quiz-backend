@@ -267,7 +267,7 @@ private val ROUTE_QUESTION = Question(ROUTE_ID, "Which currency does Japan use?"
 
 private fun routeSettings() = ApiSettings(
     adminUsername = ROUTE_USERNAME,
-    adminPassword = ROUTE_PASSWORD,
+    adminPasswordHash = testPasswordHash(ROUTE_PASSWORD),
     jwtSecret = "route-test-signing-secret-at-least-thirty-two-bytes",
 )
 

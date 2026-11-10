@@ -27,7 +27,7 @@ class ContractTest : FunSpec() {
     }
 
     init {
-        test("browser login refresh activity and logout responses conform to shared contract") {
+        test("browser JWT login refresh and logout responses conform to shared contract") {
             withApi {
                 val sessionPath = "/api/v1/auth/session"
                 suspend fun check(response: HttpResponse, path: String, method: Request.Method, status: HttpStatusCode) {
@@ -56,15 +56,11 @@ class ContractTest : FunSpec() {
                     header(CSRF_HEADER, csrf)
                 }
                 check(refreshed, "$sessionPath/refresh", Request.Method.POST, HttpStatusCode.OK)
-                val activity = client.post("$sessionPath/activity") {
-                    header(HttpHeaders.Origin, "http://localhost:5173")
-                    header(HttpHeaders.Cookie, refreshed.cookies())
-                    header(CSRF_HEADER, csrf)
-                }
-                check(activity, "$sessionPath/activity", Request.Method.POST, HttpStatusCode.OK)
+                val refreshCookie = login.headers.getAll(HttpHeaders.SetCookie).orEmpty()
+                    .single { it.startsWith("$ADMIN_REFRESH_COOKIE_NAME=") }.substringBefore(';')
                 val logout = client.delete(sessionPath) {
                     header(HttpHeaders.Origin, "http://localhost:5173")
-                    header(HttpHeaders.Cookie, refreshed.cookies())
+                    header(HttpHeaders.Cookie, "${refreshed.cookies()}; $refreshCookie")
                     header(CSRF_HEADER, csrf)
                 }
                 check(logout, sessionPath, Request.Method.DELETE, HttpStatusCode.NoContent)
@@ -259,7 +255,7 @@ class ContractTest : FunSpec() {
                 environment { config = MapApplicationConfig() }
                 application {
                     quizModule(
-                        ApiSettings(ADMIN_USERNAME, ADMIN_PASSWORD, JWT_SECRET, adminAllowedOrigins = listOf("http://localhost:5173")),
+                        ApiSettings(ADMIN_USERNAME, testPasswordHash(ADMIN_PASSWORD), JWT_SECRET, adminAllowedOrigins = listOf("http://localhost:5173")),
                         FileQuestionRepository(storage),
                     )
                 }

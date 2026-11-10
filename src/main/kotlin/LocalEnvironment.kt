@@ -8,9 +8,9 @@ import java.nio.file.Path
 import java.util.Properties
 
 private val applicationEnvironmentKeys = setOf(
-    "QUESTIONS_FILE", "PORT", "ADMIN_USERNAME", "ADMIN_PASSWORD", "JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE",
+    "QUESTIONS_FILE", "PORT", "ADMIN_USERNAME", "ADMIN_PASSWORD_HASH", "JWT_SECRET", "JWT_ISSUER", "JWT_AUDIENCE",
     "JWT_TOKEN_TTL_SECONDS", "CORS_ALLOWED_ORIGINS", "ADMIN_CORS_ALLOWED_ORIGINS", "AUTH_COOKIE_SECURE",
-    "AUTH_COOKIE_SAME_SITE", "ADMIN_SESSION_IDLE_SECONDS", "ADMIN_SESSION_ABSOLUTE_SECONDS",
+    "AUTH_COOKIE_SAME_SITE", "JWT_REFRESH_TOKEN_TTL_SECONDS",
 )
 
 /** Ktor's YAML substitutions read JVM properties as well as OS environment variables. */
@@ -32,7 +32,9 @@ internal fun loadLocalEnvironment(
     }
     for (entry in localEnvironment.entries(Dotenv.Filter.DECLARED_IN_ENV_FILE)) {
         if (entry.key in applicationEnvironmentKeys && entry.key !in environment && properties.getProperty(entry.key) == null) {
-            properties.setProperty(entry.key, entry.value)
+            // Compose needs literal single quotes around bcrypt hashes; dotenv-kotlin preserves those quotes.
+            val value = if (entry.key == "ADMIN_PASSWORD_HASH") entry.value.removeSurrounding("'") else entry.value
+            properties.setProperty(entry.key, value)
         }
     }
 }
